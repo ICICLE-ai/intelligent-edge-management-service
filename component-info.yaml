@@ -1,0 +1,30 @@
+# ICICLE component catalog metadata for Intelligent Edge Management Service.
+# See templates/COMPONENT_INFO_SKILL.md for field definitions and validation rules.
+
+- id: "IntelligentEdgeManagementService:0.1.0"
+  owner: "Harikesh Byrandurga Gopinath"
+  primaryThrust: "core/CI4AI"
+  name: "Intelligent Edge Management Service"
+  status: "BetaRelease"
+  description: >
+    Fleet control plane for deploying and managing AI applications on ICICLE edge
+    devices. Provides a web dashboard, device agent orchestration over MQTT,
+    model-card deployments, heartbeat monitoring, and TapisUI portal integration.
+  componentVersion: "0.1.0"
+  targetIcicleRelease: None
+
+  hasDependentComponents:
+    - related_to: "Patra:0.1.0"
+      relationship_type: "DependsOn"
+    - related_to: "icicleai-tapisui-extension:0.1.1"
+      relationship_type: "DependsOn"
+
+  licenseUrl: "https://github.com/ICICLE-ai/intelligent-edge-management-service?tab=BSD-3-Clause-1-ov-file"
+  publicAccess: true
+  sourceCodeUrl: "https://github.com/ICICLE-ai/intelligent-edge-management-service"
+  codeReviewConducted: false
+  testsWritten: true
+  developerDocumentationAvailable: true
+  trainingTutorialsAvailable: true
+  # developerDocumentationUrl — add after training-catalog deployment if using catalog-hosted API docs
+  # trainingTutorialsUrl — filled in by training-catalog after deployment; do not set here
