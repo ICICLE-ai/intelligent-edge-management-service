@@ -1,0 +1,72 @@
+{% extends "_layout/base.html" %}
+{% block title %}App Catalog · ICICLE Edge{% endblock %}
+{% block topbar_title %}App Catalog{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">App catalog</h1></div>
+    <div class="page-header__subtitle">Published edge apps you can deploy to your fleet — your Docker image + model weights + config.</div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn" href="/apps/new">Publish App</a>
+    <a class="btn btn--outline" href="/apps/compatibility">Compatibility Matrix</a>
+  </div>
+</div>
+
+<section class="card">
+  <header class="card__head"><h2>Published</h2><span class="muted small">Ready to deploy</span></header>
+  <div class="card__body" style="padding:0">
+    <table class="table">
+      <thead><tr><th>App</th><th>App ID</th><th>Version</th><th>Owner</th><th>Visibility</th><th>Image</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for m in published %}
+          <tr>
+            <td>
+              <a href="/apps/{{ m.model_card_uid }}"><b>{{ m.display_name }}</b></a>
+              {% if m.task_type %}<div class="tiny text-mute">{{ m.task_type }}</div>{% endif %}
+            </td>
+            <td class="small mono">
+              {% if m.app_id %}
+                <span class="copy-link" data-copy="{{ m.app_id }}" title="{{ m.app_id }}">{{ m.app_id }}</span>
+              {% else %}
+                <span class="text-mute">—</span>
+              {% endif %}
+            </td>
+            <td class="small mono">v{{ m.version }}</td>
+            <td class="small">{{ m.owner_tapis_username }}</td>
+            <td><span class="badge {% if m.visibility == 'public' %}badge--green{% else %}badge--grey{% endif %}">{{ (m.visibility or 'private') | upper }}</span></td>
+            <td class="small mono">{{ m.image_repository }}:{{ m.image_tag }}</td>
+            <td><span class="badge {{ badge_class(m.status) }}">{{ m.status }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7"><div class="empty"><h3>No published apps</h3><p>Publish an app to deploy it to devices.</p><a class="btn" href="/apps/new">Publish App</a></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section card">
+  <header class="card__head"><h2>Your drafts &amp; archives</h2></header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>App</th><th>App ID</th><th>Version</th><th>Visibility</th><th>Status</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for m in mine %}
+          <tr>
+            <td><a href="/apps/{{ m.model_card_uid }}">{{ m.display_name }}</a></td>
+            <td class="small mono">{{ m.app_id or '—' }}</td>
+            <td class="small mono">v{{ m.version }}</td>
+            <td><span class="badge {% if m.visibility == 'public' %}badge--green{% else %}badge--grey{% endif %}">{{ (m.visibility or 'private') | upper }}</span></td>
+            <td><span class="badge {{ badge_class(m.status) }}">{{ m.status }}</span></td>
+            <td class="small text-soft">{{ m.updated_at | relative }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6"><span class="text-mute small">You haven't published any apps yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

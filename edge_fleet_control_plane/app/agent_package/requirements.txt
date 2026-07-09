@@ -1,0 +1,4 @@
+# Pinned for Python 3.6+ (JetPack 4 Xavier) through 3.10+ (JetPack 6 Orin).
+# One requirements file for all Jetson generations — the agent is intentionally thin.
+requests==2.27.1
+paho-mqtt==1.6.1

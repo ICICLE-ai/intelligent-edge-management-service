@@ -1,0 +1,115 @@
+{% extends "_layout/base.html" %}
+{% block title %}Admin · Hardware · ICICLE Edge{% endblock %}
+{% block topbar_title %}Admin / Hardware Catalog{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Hardware catalog</h1></div>
+    <div class="page-header__subtitle">Add or retire supported Jetson generations used during device registration and model compatibility.</div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn btn--ghost" href="/hardware">Public view</a>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <section class="card fieldset--accent">
+    <header class="card__head"><h2>Add / update generation</h2></header>
+    <div class="card__body">
+      <form method="post" action="/admin/hardware" data-loading class="form">
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label">Generation UID</label>
+            <input class="input mono" name="generation_uid" placeholder="jetson-orin-nano-v2" required />
+            <div class="field__hint">Stable slug — used in APIs and agent config.</div>
+          </div>
+          <div class="field">
+            <label class="field__label">Display name</label>
+            <input class="input" name="display_name" placeholder="Jetson Orin Nano" required />
+          </div>
+          <div class="field">
+            <label class="field__label">Hardware type</label>
+            <input class="input mono" name="hardware_type" placeholder="jetson-orin-nano" required />
+          </div>
+          <div class="field">
+            <label class="field__label">Architecture</label>
+            <input class="input mono" name="architecture" value="aarch64" required />
+          </div>
+          <div class="field">
+            <label class="field__label">Vendor</label>
+            <input class="input" name="vendor" value="NVIDIA" />
+          </div>
+          <div class="field">
+            <label class="field__label">Device family</label>
+            <input class="input" name="device_family" value="Jetson" />
+          </div>
+          <div class="field">
+            <label class="field__label">Default runtime</label>
+            <input class="input mono" name="default_runtime" value="nvidia" />
+          </div>
+          <div class="field">
+            <label class="field__label">CPU cores</label>
+            <input class="input" name="cpu_cores" type="number" min="1" />
+          </div>
+          <div class="field">
+            <label class="field__label">Memory (MB)</label>
+            <input class="input" name="memory_mb" type="number" min="512" step="512" />
+          </div>
+          <div class="field">
+            <label class="field__label">Storage (GB)</label>
+            <input class="input" name="storage_gb" type="number" min="1" />
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label">Description</label>
+          <textarea class="input" name="description" rows="3" placeholder="Short operator-facing notes…"></textarea>
+        </div>
+        <label class="check"><input type="checkbox" name="cuda_supported" checked> CUDA supported</label>
+        <div class="row" style="margin-top:16px">
+          <button class="btn" type="submit">Save generation</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head"><h2>Registered generations</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Generation</th><th>Specs</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for g in generations %}
+            <tr>
+              <td>
+                <b>{{ g.display_name }}</b>
+                <div class="tiny text-mute mono">{{ g.generation_uid }}</div>
+              </td>
+              <td class="small">
+                {{ g.hardware_type }} · {{ g.architecture }}
+                {% if g.memory_mb %} · {{ g.memory_mb }} MB{% endif %}
+              </td>
+              <td>
+                {% if g.is_active %}
+                  <span class="badge badge--green">ACTIVE</span>
+                {% else %}
+                  <span class="badge badge--grey">INACTIVE</span>
+                {% endif %}
+              </td>
+              <td class="right">
+                {% if g.is_active %}
+                  <form method="post" action="/admin/hardware/{{ g.generation_uid }}/deactivate" data-confirm="Deactivate this generation? Existing devices keep their assignment.">
+                    <button class="btn btn--ghost btn--sm">Deactivate</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4"><span class="text-mute small">No generations yet.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

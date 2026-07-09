@@ -1,0 +1,20 @@
+{% extends "_layout/base.html" %}
+{% block title %}Sign in · Intelligent Edge Management Service{% endblock %}
+{% block topbar_title %}Sign in{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width:520px;margin:48px auto">
+  <header class="card__head"><h1>Intelligent Edge Management Service</h1></header>
+  <div class="card__body">
+    {% if error %}
+      <div class="notice notice--danger" style="margin-bottom:16px">{{ error }}</div>
+    {% else %}
+      <p class="text-soft">Redirecting to Tapis for sign-in…</p>
+      <p class="text-mute small" style="margin-top:12px">If you are not redirected automatically, use the button below.</p>
+    {% endif %}
+    <div style="margin-top:20px">
+      <a class="btn btn--primary" href="/auth/start?next={{ next | urlencode }}">Sign in with Tapis</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

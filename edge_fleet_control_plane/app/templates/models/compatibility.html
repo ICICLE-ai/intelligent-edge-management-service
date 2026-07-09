@@ -1,0 +1,44 @@
+{% extends "_layout/base.html" %}
+{% block title %}Compatibility Matrix · ICICLE Edge{% endblock %}
+{% block topbar_title %}Apps / Compatibility{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1>Compatibility matrix</h1></div>
+    <div class="page-header__subtitle">Which apps can be deployed onto which device generations.</div>
+  </div>
+</div>
+
+{% if cards %}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>App</th>
+        {% for g in generations %}<th>{{ g.display_name }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in cards %}
+        <tr>
+          <td><a href="/apps/{{ c.model_card_uid }}"><b>{{ c.display_name }} v{{ c.version }}</b></a></td>
+          {% set supported = by_card.get(c.model_card_uid, []) %}
+          {% for g in generations %}
+            <td>
+              {% if g.generation_uid in supported %}
+                <span class="badge badge--green">supported</span>
+              {% else %}
+                <span class="text-mute small">—</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty"><h3>No published model cards yet.</h3></div>
+{% endif %}
+{% endblock %}

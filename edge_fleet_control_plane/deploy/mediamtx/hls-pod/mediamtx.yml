@@ -1,0 +1,35 @@
+# MediaMTX playback pod — pulls each stream from the ingest pod over RTSPS
+# (through Tapis TLS termination) and serves it to browsers as LL-HLS.
+#
+# Any path requested here (e.g. cam-dev_abc123) is proxied from the SAME path on
+# the ingest pod. $G1 is the regex capture group of the path name.
+
+logLevel: info
+api: no
+metrics: no
+playback: no
+rtmp: no
+srt: no
+webrtc: no
+
+# RTSP server stays enabled (default) because the source pull uses the RTSP
+# client subsystem. It is NOT in this pod's networking config, so it is never
+# exposed externally — only HLS (8888) is.
+
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes
+hlsVariant: lowLatency
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsAllowOrigins: ['*']
+
+paths:
+  "~^(.+)$":
+    # Pull from the ingest pod. Port 443 + rtsps:// because Tapis terminates TLS
+    # at its ingress and forwards plain RTSP to the ingest container.
+    source: rtsps://edgemediaingest.pods.icicleai.tapis.io:443/$G1
+    rtspTransport: tcp
+    sourceOnDemand: yes
+    sourceOnDemandStartTimeout: 15s
+    sourceOnDemandCloseAfter: 20s

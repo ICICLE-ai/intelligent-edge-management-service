@@ -1,0 +1,129 @@
+{% extends "_layout/base.html" %}
+{% block title %}{{ group.group_name }} · ICICLE Edge{% endblock %}
+{% block topbar_title %}Groups / {{ group.group_name }}{% endblock %}
+
+{% block content %}
+<div data-poll-group-detail data-poll-url="/api/groups/{{ group.group_uid }}/status" data-poll-interval="4000">
+<div class="page-header">
+  <div>
+    <div class="page-header__title">
+      <h1 class="title-gradient"><span class="color-dot {{ group.color_tag }}"></span>{{ group.group_name }}</h1>
+    </div>
+    <div class="page-header__subtitle">
+      <span data-copy="{{ group.group_uid }}" class="kbd copy-link">{{ group.group_uid }}</span>
+      {% if group.site_name %} · {{ group.site_name }}{% endif %}
+      {% if group.description %} — {{ group.description }}{% endif %}
+    </div>
+  </div>
+  <div class="page-header__actions">
+    <form method="post" action="/groups/{{ group.group_uid }}/delete" data-confirm="Delete this group? Devices will be detached." style="display:inline-block">
+      <button class="btn btn--ghost">Delete group</button>
+    </form>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat"><div class="stat__label">Devices</div><div class="stat__value">{{ devices|length }}</div></div>
+  <div class="stat stat--green"><div class="stat__label">Online</div><div class="stat__value">{{ devices|selectattr('status','in',['ONLINE','RUNNING'])|list|length }}</div></div>
+  <div class="stat stat--amber"><div class="stat__label">Deployments</div><div class="stat__value">{{ deployments|length }}</div></div>
+  <div class="stat stat--slate"><div class="stat__label">Compatible apps</div><div class="stat__value">{{ (my_apps|length) + (other_apps|length) }}</div></div>
+</div>
+
+<section class="section card">
+  <header class="card__head">
+    <h2>Run an app on this group</h2>
+    <span class="muted small">Each device receives its own deploy command with a per-device inference stream URL.</span>
+  </header>
+  <div class="card__body">
+    {% if (my_apps or other_apps) and devices %}
+      <form method="post" action="/deployments" class="form" data-loading>
+        <input type="hidden" name="target_type" value="GROUP">
+        <input type="hidden" name="target_uid" value="{{ group.group_uid }}">
+        <input type="hidden" name="redirect_to" value="/groups/{{ group.group_uid }}">
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label">App</label>
+            {% include "_partials/app_select.html" %}
+          </div>
+          <div class="field">
+            <label class="field__label">Notes</label>
+            <input class="input" name="notes" placeholder="Field-trial group rollout">
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn--success" data-loading-text="Dispatching…">Deploy to group</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="empty">
+        <h3>{% if not devices %}No devices in this group yet{% else %}No compatible apps{% endif %}</h3>
+        <p>{% if not devices %}Add a device to this group from the device detail page.{% else %}Publish an app and add compatibility for the generations in this group.{% endif %}</p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+{% if inference_streams and inference_streams.enabled %}
+{% include "_partials/inference_stream_grid.html" %}
+{% endif %}
+
+<div class="grid grid-2" style="margin-top:20px">
+  <section class="card">
+    <header class="card__head"><h2>Devices in this group</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Device</th><th>Status</th><th>Last seen</th></tr></thead>
+        <tbody>
+          {% for d in devices %}
+            <tr data-poll-list-row="{{ d.device_uid }}">
+              <td><a href="/devices/{{d.device_uid}}"><b>{{d.device_name}}</b></a><div class="tiny text-mute">{{d.device_uid}}</div></td>
+              <td><span class="badge {{ badge_class(d.status) }}" data-poll-list-status>{{ d.status }}</span></td>
+              <td class="small text-soft" data-poll-list-seen>{{ d.last_heartbeat_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3"><span class="text-mute small">No devices in this group.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head"><h2>Recent deployments</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Model</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody>
+          {% for d in deployments %}
+            <tr data-poll-deployment-row="{{ d.deployment_uid }}">
+              <td><a href="/deployments/{{ d.deployment_uid }}"><b>{{ d.model_display_name }} v{{ d.model_version }}</b></a></td>
+              <td><span class="badge {{ badge_class(d.status) }}" data-poll-list-status>{{ d.status }}</span></td>
+              <td class="small text-soft">{{ d.created_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3"><span class="text-mute small">No deployments yet.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if inference_streams and inference_streams.enabled %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script src="/static/js/hls-player.js?v=5"></script>
+<script>
+(function () {
+  var root = document.getElementById('inference-streams');
+  if (!root || !window.IcicleHls) return;
+  window.IcicleHls.bootstrapInference(root, {
+    waitingMessage: 'Waiting for inference stream…',
+    connectingMessage: 'Connecting…',
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

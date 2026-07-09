@@ -1,0 +1,17 @@
+{# Dual dropdown: My apps + Other apps (public). Expects my_apps and other_apps lists. #}
+<select class="select" name="model_card_uid" required>
+  {% if my_apps %}
+    <optgroup label="My apps">
+      {% for m in my_apps %}
+        <option value="{{ m.model_card_uid }}">{{ m.display_name }} v{{ m.version }}{% if m.task_type %} — {{ m.task_type }}{% endif %}</option>
+      {% endfor %}
+    </optgroup>
+  {% endif %}
+  {% if other_apps %}
+    <optgroup label="Other apps">
+      {% for m in other_apps %}
+        <option value="{{ m.model_card_uid }}">{{ m.display_name }} v{{ m.version }}{% if m.task_type %} — {{ m.task_type }}{% endif %} · {{ m.owner_tapis_username }}</option>
+      {% endfor %}
+    </optgroup>
+  {% endif %}
+</select>

@@ -1,0 +1,31 @@
+{% extends "_layout/base.html" %}
+{% block title %}MQTT Audit · ICICLE Edge{% endblock %}
+{% block topbar_title %}Operations / MQTT Audit{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1>MQTT audit</h1></div>
+    <div class="page-header__subtitle">Raw message trail for inbound and outbound MQTT traffic.</div>
+  </div>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead><tr><th>Direction</th><th>Topic</th><th>Request</th><th>Device</th><th>When</th></tr></thead>
+    <tbody>
+      {% for e in events %}
+        <tr>
+          <td><span class="badge {% if e.direction == 'OUTBOUND' %}badge--blue{% else %}badge--violet{% endif %}">{{ e.direction }}</span></td>
+          <td class="mono tiny">{{ e.topic }}</td>
+          <td class="mono tiny">{{ e.request_id or '—' }}</td>
+          <td class="mono tiny text-soft">{{ e.device_uid or '—' }}</td>
+          <td class="small text-soft">{{ e.created_at | relative }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5"><span class="text-mute small">No MQTT traffic recorded yet.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

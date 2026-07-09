@@ -1,0 +1,38 @@
+{% extends "_layout/base.html" %}
+{% block title %}Command Log · ICICLE Edge{% endblock %}
+{% block topbar_title %}Operations / Command Log{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Command log</h1></div>
+    <div class="page-header__subtitle">Every outbound device/group command, with topic and payload.</div>
+  </div>
+</div>
+
+<div class="card" data-poll-commands-list data-poll-url="/api/operations/commands">
+  <table class="table">
+    <thead><tr><th>Operation</th><th>Target</th><th>Status</th><th>Request ID</th><th>Topic</th><th>Created</th></tr></thead>
+    <tbody>
+      {% for c in commands %}
+        <tr data-poll-command-row="{{ c.request_id }}">
+          <td class="mono small">{{ c.operation }}</td>
+          <td class="small">
+            {% if c.target_type == 'GROUP' %}
+              <a href="/groups/{{ c.target_uid }}">group · {{ c.target_uid }}</a>
+            {% else %}
+              <a href="/devices/{{ c.target_uid }}">device · {{ c.target_uid }}</a>
+            {% endif %}
+          </td>
+          <td><span class="badge {{ badge_class(c.status) }}" data-poll-command-status>{{ c.status }}</span></td>
+          <td class="mono tiny">{{ c.request_id }}</td>
+          <td class="mono tiny text-soft">{{ c.topic }}</td>
+          <td class="small text-soft">{{ c.created_at | relative }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6"><span class="text-mute small">No commands yet.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

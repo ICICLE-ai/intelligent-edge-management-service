@@ -1,0 +1,51 @@
+{% extends "_layout/base.html" %}
+{% block title %}Devices · ICICLE Edge{% endblock %}
+{% block topbar_title %}Devices{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Devices</h1></div>
+    <div class="page-header__subtitle">All Jetson devices owned by <code>{{ user }}</code>.</div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn" href="/devices/setup">Set Up Device</a>
+  </div>
+</div>
+
+{% if devices %}
+<div class="card" data-poll-devices-list data-poll-url="/api/devices">
+  <table class="table">
+    <thead><tr>
+      <th>Device</th><th>Generation</th><th>Group</th><th>Status</th>
+      <th>Last seen</th><th class="right">Installer</th>
+    </tr></thead>
+    <tbody>
+      {% for d in devices %}
+        <tr data-poll-list-row="{{ d.device_uid }}">
+          <td>
+            <a href="/devices/{{d.device_uid}}"><b>{{ d.device_name }}</b></a>
+            <div class="tiny text-mute">{{ d.device_uid }}{% if d.device_alias %} · {{ d.device_alias }}{% endif %}</div>
+          </td>
+          <td class="small">{{ d.generation_name or '—' }}</td>
+          <td class="small">
+            {% if d.group_name %}
+              <span class="color-dot {{ d.group_color or 'indigo' }}"></span>{{ d.group_name }}
+            {% else %}<span class="text-mute">—</span>{% endif %}
+          </td>
+          <td><span class="badge {{ badge_class(d.status) }}" data-poll-list-status>{{ d.status }}</span></td>
+          <td class="small text-soft" data-poll-list-seen>{{ d.last_heartbeat_at | relative }}</td>
+          <td class="right"><a class="btn btn--ghost btn--sm" href="/devices/{{d.device_uid}}/installer">Download</a></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <h3>No devices yet</h3>
+  <p>Register your first Jetson to mint an installer.</p>
+  <a class="btn" href="/devices/setup">Set Up Device</a>
+</div>
+{% endif %}
+{% endblock %}

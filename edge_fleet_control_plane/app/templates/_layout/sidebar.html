@@ -1,0 +1,135 @@
+{# Categorised accordion sidebar. Each `data-group` id is persisted in localStorage. #}
+<aside class="sidebar">
+  <div class="sidebar__brand">
+    <div class="sidebar__brand-logo">IE</div>
+    <div>
+      <div class="sidebar__brand-title">Intelligent Edge Management Service</div>
+      <div class="sidebar__brand-sub">Control Plane</div>
+    </div>
+  </div>
+  <nav class="sidebar__nav">
+
+    <div class="nav-group is-open" data-group="overview" data-default-open="true">
+      <div class="nav-group__header">
+        <span>Overview</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'dashboard' %}is-active{% endif %}" href="/">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Dashboard
+        </a>
+      </div>
+    </div>
+
+    <div class="nav-group" data-group="fleet">
+      <div class="nav-group__header">
+        <span>Fleet</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'devices' %}is-active{% endif %}" href="/devices">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+          Devices
+        </a>
+        <a class="nav-link {% if active_nav == 'groups' %}is-active{% endif %}" href="/groups">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="17" cy="10" r="2"/><path d="M21 21v-1a3 3 0 0 0-2-2.83"/></svg>
+          Device Groups
+        </a>
+        <a class="nav-link {% if active_nav == 'devices_setup' %}is-active{% endif %}" href="/devices/setup">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Set Up Device
+        </a>
+        <a class="nav-link {% if active_nav == 'hardware' %}is-active{% endif %}" href="/hardware">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+          Supported Hardware
+        </a>
+      </div>
+    </div>
+
+    <div class="nav-group" data-group="apps">
+      <div class="nav-group__header">
+        <span>Apps</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'apps' %}is-active{% endif %}" href="/apps">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/><path d="M21 12H10l-2 3H4"/></svg>
+          App Catalog
+        </a>
+        <a class="nav-link {% if active_nav == 'apps_new' %}is-active{% endif %}" href="/apps/new">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg>
+          Publish App
+        </a>
+        <a class="nav-link {% if active_nav == 'apps_compat' %}is-active{% endif %}" href="/apps/compatibility">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg>
+          Compatibility Matrix
+        </a>
+      </div>
+    </div>
+
+    <div class="nav-group" data-group="deployments">
+      <div class="nav-group__header">
+        <span>Deployments</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'deployments_active' %}is-active{% endif %}" href="/deployments?scope=active">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Active Deployments
+        </a>
+        <a class="nav-link {% if active_nav == 'deployments_history' %}is-active{% endif %}" href="/deployments?scope=all">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+          History
+        </a>
+      </div>
+    </div>
+
+    <div class="nav-group" data-group="ops">
+      <div class="nav-group__header">
+        <span>Operations</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'ops_commands' %}is-active{% endif %}" href="/operations/commands">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Command Log
+        </a>
+        <a class="nav-link {% if active_nav == 'ops_events' %}is-active{% endif %}" href="/operations/events">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Events
+        </a>
+        <a class="nav-link {% if active_nav == 'ops_mqtt' %}is-active{% endif %}" href="/operations/mqtt">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12a10 10 0 0 1 20 0"/><path d="M2 12a10 10 0 0 0 20 0"/><circle cx="12" cy="12" r="2"/></svg>
+          MQTT Audit
+        </a>
+      </div>
+    </div>
+
+    {% if request.state.is_admin %}
+    <div class="nav-group" data-group="admin">
+      <div class="nav-group__header">
+        <span>Admin</span>
+        <svg class="nav-group__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="nav-group__items">
+        <a class="nav-link {% if active_nav == 'admin_hardware' %}is-active{% endif %}" href="/admin/hardware">
+          <svg class="nav-link__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15a1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 3.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 3.6a1.65 1.65 0 0 0 1-1.51V2a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 8c.36.41.57.94.57 1.51s-.21 1.1-.57 1.51Z"/></svg>
+          Hardware Catalog
+        </a>
+      </div>
+    </div>
+    {% endif %}
+
+  </nav>
+  <div class="sidebar__footer">
+    <div class="sidebar__avatar">{{ (user or 'u')[0]|upper }}</div>
+    <div class="sidebar__user">
+      <div class="sidebar__user-name">{{ user or 'guest' }}</div>
+      <div class="sidebar__user-role">{{ request.state.user_role }}</div>
+    </div>
+    {% if not request.state.local_dev_auth %}
+    <a class="sidebar__logout" href="/auth/logout" title="Sign out">Sign out</a>
+    {% endif %}
+  </div>
+</aside>

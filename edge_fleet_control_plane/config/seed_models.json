@@ -1,0 +1,166 @@
+[
+  {
+    "model_card_uid": "mc_seed_unetpp",
+    "app_id": "app_seed_unetpp",
+    "visibility": "public",
+    "slug": "unetpp-segmentation",
+    "display_name": "UNet++ Corn Residue Segmentation",
+    "version": "1.0.0",
+    "task_type": "segmentation",
+    "framework": "tensorrt",
+    "description": "TensorRT FP16 engine for corn residue semantic segmentation at 512x768. Designed for Jetson Orin Nano; tested with NVIDIA L4T r35.4.",
+    "license": "Apache-2.0",
+    "homepage_url": "https://icicle.ai/models/unetpp",
+    "tags": ["agriculture", "segmentation", "tensorrt", "fp16"],
+    "status": "PUBLISHED",
+    "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
+    "raw_docker_command": "docker run -d --name unetpp_infer --runtime nvidia --gpus all --network host --ipc host --privileged -e NVIDIA_DRIVER_CAPABILITIES=all -e SHOW_WINDOW=1 -e DISPLAY=$DISPLAY -e ENGINE_PATH=/workspace/models/unetpp_teacher_512x768_fp16.engine --mount type=bind,source=/tmp/argus_socket,target=/tmp/argus_socket -v /tmp/.X11-unix:/tmp/.X11-unix -v /opt/models/unetpp:/workspace/models:ro habg21/unet-trt-infer:latest",
+    "artifact": {
+      "filename": "unetpp_teacher_512x768_fp16.engine",
+      "container_path": "/workspace/models/unetpp_teacher_512x768_fp16.engine",
+      "source_type": "patra",
+      "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
+      "size_bytes": 99712684,
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/unet-trt-infer",
+      "image_tag": "latest",
+      "container_name": "unetpp_infer",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": false,
+      "model_env_var": "ENGINE_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "ipc_mode": "host",
+      "privileged": true,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "SHOW_WINDOW": "1",
+        "DISPLAY": "$DISPLAY",
+        "ENGINE_PATH": "/workspace/models/unetpp_teacher_512x768_fp16.engine"
+      },
+      "mounts": [
+        {"style": "mount",  "type": "bind", "source": "/tmp/argus_socket",                       "target": "/tmp/argus_socket"},
+        {"style": "volume", "type": "bind", "source": "/tmp/.X11-unix",                          "target": "/tmp/.X11-unix"},
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model",                 "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "jetson-orin-nano-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Reference configuration."},
+      {"generation_uid": "jetson-xavier-nx-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Re-compile engine for Volta if needed."}
+    ]
+  },
+  {
+    "model_card_uid": "mc_seed_unetpp_live",
+    "app_id": "app_seed_unetpp_live",
+    "visibility": "public",
+    "slug": "unetpp-segmentation-live",
+    "display_name": "UNet++ Corn Residue (Live Stream)",
+    "version": "1.1.0",
+    "task_type": "segmentation",
+    "framework": "tensorrt",
+    "description": "TensorRT FP16 UNet++ with annotated RTSPS live stream for the ICICLE portal. Supports single or multi-CSI camera — portal injects STREAM_INGEST_URL or STREAM_INGEST_URL_0..N based on device camera count.",
+    "license": "Apache-2.0",
+    "homepage_url": "https://icicle.ai/models/unetpp",
+    "tags": ["agriculture", "segmentation", "tensorrt", "fp16", "live-stream", "csi", "multi-camera"],
+    "status": "PUBLISHED",
+    "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
+    "raw_docker_command": "docker run -d --name unetpp_infer_live --runtime nvidia --gpus all --network host --ipc host --privileged -e NVIDIA_DRIVER_CAPABILITIES=all -e SHOW_WINDOW=0 -e ENGINE_PATH=/workspace/models/unetpp_teacher_512x768_fp16.engine -e DETECT_EVERY_N_FRAMES=4 -e STREAM_FPS=8 -e STREAM_WIDTH=960 -e STREAM_HEIGHT=540 --mount type=bind,source=/tmp/argus_socket,target=/tmp/argus_socket -v /opt/models/unetpp:/workspace/models:ro habg21/unet-trt-infer-live:latest\n\n# Multi-CSI (2+ cameras): add sensor indices + per-camera ingest URLs.\n# On fleet deploy the portal injects these from device hardware setup — you do not add them to the model card.\ndocker run -d --name unetpp_infer_live --runtime nvidia --gpus all --network host --ipc host --privileged -e SHOW_WINDOW=0 -e ENGINE_PATH=/workspace/models/unetpp_teacher_512x768_fp16.engine -e CAMERA_INDICES=0,1 -e STREAM_INGEST_URL_0=rtsps://<ingest-host>/cam-<device_uid>-0 -e STREAM_INGEST_URL_1=rtsps://<ingest-host>/cam-<device_uid>-1 -e DETECT_EVERY_N_FRAMES=4 -e STREAM_FPS=8 --mount type=bind,source=/tmp/argus_socket,target=/tmp/argus_socket -v /opt/models/unetpp:/workspace/models:ro habg21/unet-trt-infer-live:latest",
+    "artifact": {
+      "filename": "unetpp_teacher_512x768_fp16.engine",
+      "container_path": "/workspace/models/unetpp_teacher_512x768_fp16.engine",
+      "source_type": "patra",
+      "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
+      "size_bytes": 99712684,
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/unet-trt-infer-live",
+      "image_tag": "latest",
+      "container_name": "unetpp_infer_live",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": false,
+      "model_env_var": "ENGINE_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "ipc_mode": "host",
+      "privileged": true,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "SHOW_WINDOW": "0",
+        "ENGINE_PATH": "/workspace/models/unetpp_teacher_512x768_fp16.engine",
+        "DETECT_EVERY_N_FRAMES": "4",
+        "STREAM_FPS": "8",
+        "STREAM_WIDTH": "960",
+        "STREAM_HEIGHT": "540",
+        "DISPLAY_WIDTH": "960"
+      },
+      "mounts": [
+        {"style": "mount",  "type": "bind", "source": "/tmp/argus_socket",                       "target": "/tmp/argus_socket"},
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model",                 "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "jetson-orin-nano-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Single cam: STREAM_INGEST_URL injected on deploy. Multi-CSI: set camera count ≥ 2 in device hardware setup."},
+      {"generation_uid": "jetson-xavier-nx-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Re-compile engine for Volta if needed."}
+    ]
+  },
+  {
+    "model_card_uid": "mc_seed_unetpp_mvs_multicam_live",
+    "app_id": "app_seed_unetpp_mvs_multicam",
+    "visibility": "public",
+    "slug": "unetpp-mvs-multicam-live",
+    "display_name": "UNet++ MVS Multi-Camera (Live Stream)",
+    "version": "1.0.0",
+    "task_type": "segmentation",
+    "framework": "tensorrt",
+    "description": "TensorRT UNet++ on Hikrobot GigE cameras via MVS SDK. Per-camera RTSPS push (Option B). Portal injects STREAM_INGEST_URL_0..N and CAMERA_INDICES on deploy.",
+    "license": "Apache-2.0",
+    "homepage_url": "https://icicle.ai/models/unetpp",
+    "tags": ["agriculture", "segmentation", "tensorrt", "live-stream", "gige-mvs", "multi-camera"],
+    "status": "PUBLISHED",
+    "patra_model_card_uuid": "2a25c561-9cbd-46f8-bc92-271d29c14862",
+    "raw_docker_command": "docker run --rm --runtime nvidia --gpus all --network host --privileged -v /opt/MVS:/opt/MVS:ro -v /opt/models/unetpp:/workspace/models:ro -e ENGINE_PATH=/workspace/models/unetpp_1x3x512x768_agx_xavier_jp4.engine -e CAMERA_INDICES=0,1,2 -e DETECT_EVERY_N_FRAMES=3 -e STREAM_FPS=5 -e STREAM_WIDTH=640 -e STREAM_HEIGHT=360 habg21/unet-mvs-unetpp-live:latest\n\n# Fleet deploy: portal injects per-camera ingest URLs from device hardware (camera count + MVS indices).\n# Manual test with 3 GigE cameras — replace <device_uid> and ingest host:\ndocker run --rm --runtime nvidia --gpus all --network host --privileged -v /opt/MVS:/opt/MVS:ro -v /opt/models/unetpp:/workspace/models:ro -e ENGINE_PATH=/workspace/models/unetpp_1x3x512x768_agx_xavier_jp4.engine -e CAMERA_INDICES=0,1,2 -e STREAM_INGEST_URL_0=rtsps://<ingest-host>/cam-<device_uid>-0 -e STREAM_INGEST_URL_1=rtsps://<ingest-host>/cam-<device_uid>-1 -e STREAM_INGEST_URL_2=rtsps://<ingest-host>/cam-<device_uid>-2 -e DETECT_EVERY_N_FRAMES=3 -e STREAM_FPS=5 -e STREAM_WIDTH=640 -e STREAM_HEIGHT=360 habg21/unet-mvs-unetpp-live:latest",
+    "artifact": {
+      "filename": "unetpp_1x3x512x768_agx_xavier_jp4.engine",
+      "container_path": "/workspace/models/unetpp_1x3x512x768_agx_xavier_jp4.engine",
+      "source_type": "patra",
+      "patra_model_card_uuid": "2a25c561-9cbd-46f8-bc92-271d29c14862",
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/unet-mvs-unetpp-live",
+      "image_tag": "latest",
+      "container_name": "unetpp_mvs_multicam_live",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": true,
+      "model_env_var": "ENGINE_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "privileged": true,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "DETECT_EVERY_N_FRAMES": "3",
+        "STREAM_FPS": "5",
+        "STREAM_WIDTH": "640",
+        "STREAM_HEIGHT": "360",
+        "DISPLAY_WIDTH": "640",
+        "QT_QPA_PLATFORM": "offscreen"
+      },
+      "mounts": [
+        {"style": "volume", "type": "bind", "source": "/opt/MVS", "target": "/opt/MVS", "mode": "ro"},
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model", "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "jetson-agx-xavier-jp4-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "Engine must be built on JP4 Xavier (TRT 7). MVS SDK required on host at /opt/MVS."}
+    ]
+  }
+]

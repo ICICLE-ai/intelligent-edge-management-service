@@ -1,0 +1,67 @@
+{# Post-register setup panel — shown when ?setup=1 or device not yet online #}
+<section class="section card setup-checklist-card" id="device-setup-panel" data-setup-checklist data-poll-setup="true">
+  <header class="card__head">
+    <div>
+      <h2>Finish device setup</h2>
+      <p class="muted small">Download the agent, run it on the Jetson, and wait for the device to come online.</p>
+    </div>
+    {% if setup_readiness.complete %}
+    <span class="badge badge--green">Setup complete</span>
+    {% elif setup_readiness.next_step %}
+    <span class="badge badge--yellow">Next: {{ setup_readiness.next_step.label }}</span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    <ol class="setup-checklist">
+      {% for step in setup_readiness.steps %}
+      <li class="setup-checklist__item {% if step.done %}is-done{% else %}is-pending{% endif %}" data-setup-step="{{ step.id }}">
+        <span class="setup-checklist__icon" aria-hidden="true">{% if step.done %}✓{% else %}○{% endif %}</span>
+        <div>
+          <div class="setup-checklist__label">{{ step.label }}</div>
+          <div class="setup-checklist__detail small text-soft" data-setup-step-detail="{{ step.id }}">{{ step.detail }}</div>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+
+    <div class="setup-install-block">
+      <h3 class="setup-install-block__title">Install the agent</h3>
+      <ol class="setup-install-steps">
+        <li>
+          <a class="btn btn--success" href="/devices/{{ device.device_uid }}/installer" id="setup-download-btn">Download installer</a>
+          <span class="small text-soft">Generates a fresh enrollment token if needed.</span>
+        </li>
+        <li>
+          <span class="small">On the Jetson (as root):</span>
+          <div class="code-block">
+            <pre class="mono" id="setup-install-cmd">tar -xzf icicle-edge-agent-{{ device.device_uid }}.tar.gz
+cd icicle-edge-agent
+sudo ./install.sh</pre>
+            <button type="button" class="btn btn--ghost btn--sm" data-copy-target="#setup-install-cmd">Copy commands</button>
+          </div>
+        </li>
+        <li class="small text-soft">The agent enrolls automatically using the token bundled in the tarball. This page updates when heartbeats arrive.</li>
+      </ol>
+      {% if enrollment %}
+      <dl class="kv" style="margin-top:16px">
+        <dt>Token expires</dt><dd class="small">{{ enrollment.expires_at | dt }}</dd>
+        <dt>Installer downloaded</dt>
+        <dd class="small" data-setup-step-detail="installer-time">{{ enrollment.installer_downloaded_at | dt if enrollment.installer_downloaded_at else 'Not yet' }}</dd>
+        <dt>Enrolled at</dt>
+        <dd class="small" data-setup-step-detail="enrolled-time">{{ enrollment.used_at | dt if enrollment.used_at else 'Waiting…' }}</dd>
+      </dl>
+      {% endif %}
+    </div>
+
+    {% if setup_readiness.complete %}
+    <div class="row" style="margin-top:20px">
+      <a class="btn" href="/devices/{{ device.device_uid }}">Dismiss setup panel</a>
+      {% if my_apps or other_apps %}
+      <span class="small text-soft">Scroll down to deploy your first app.</span>
+      {% else %}
+      <a class="btn btn--outline" href="/apps/new">Publish an app</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</section>

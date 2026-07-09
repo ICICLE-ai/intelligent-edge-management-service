@@ -1,0 +1,11 @@
+{% extends "_layout/base.html" %}
+{% block title %}{{ status_code }} · ICICLE Edge{% endblock %}
+{% block topbar_title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="empty" style="margin-top:60px">
+  <h3>{{ status_code }} — {{ title }}</h3>
+  <p>{{ message }}</p>
+  <a class="btn" href="/">Back to dashboard</a>
+</div>
+{% endblock %}

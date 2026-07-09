@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Intelligent Edge Management Service{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/app.css?v=10" />
+</head>
+<body>
+  <div class="layout">
+    {% include "_layout/sidebar.html" %}
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar__title">{% block topbar_title %}{% endblock %}</div>
+        <div class="topbar__right">
+          <span class="live-indicator" title="Live status updates enabled on this page"></span>
+          <span class="topbar__pill">{{ user or 'guest' }}</span>
+        </div>
+      </header>
+      <main class="content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/status-poll.js?v=7"></script>
+  <script src="/static/js/docker.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

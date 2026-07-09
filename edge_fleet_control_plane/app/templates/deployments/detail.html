@@ -1,0 +1,134 @@
+{% extends "_layout/base.html" %}
+{% block title %}Deployment · ICICLE Edge{% endblock %}
+{% block topbar_title %}Deployments / {{ deployment.model_display_name }}{% endblock %}
+
+{% block content %}
+{% set d = deployment %}
+{% set all_devices_terminal = d.devices and d.devices | length > 0 and (d.devices | selectattr('status', 'in', ['STOPPED', 'FAILED']) | list | length) == (d.devices | length) %}
+{% set effective_status = 'STOPPED' if d.status == 'STOPPING' and all_devices_terminal else d.status %}
+{% set redispatchable = effective_status in ['PENDING', 'RECORDED', 'DELIVERING', 'MQTT_FAILED', 'MQTT_SENT'] %}
+{% set stoppable = effective_status in ['RUNNING', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
+{% set restartable = effective_status == 'STOPPED' %}
+{% set dismissable = effective_status in ['STOPPING', 'STARTING', 'DELIVERING', 'DOWNLOADING', 'PULLING', 'PENDING', 'RECORDED', 'MQTT_FAILED', 'MQTT_SENT'] %}
+{% set deletable = effective_status not in ['CANCELLED'] %}
+<div data-poll-deployment-detail data-poll-url="/api/deployments/{{ d.deployment_uid }}/poll" data-poll-interval="2000">
+<div class="page-header">
+  <div>
+    <div class="page-header__title">
+      <h1 class="title-gradient">{{ d.model_display_name }} <span class="text-mute title-muted">v{{ d.model_version }}</span></h1>
+      <span class="badge {{ badge_class(effective_status) }}" data-poll-deployment-status data-status="{{ effective_status }}">{{ effective_status }}</span>
+    </div>
+    <div class="page-header__subtitle">
+      <span data-copy="{{ d.deployment_uid }}" class="kbd copy-link">{{ d.deployment_uid }}</span>
+      · target: {{ d.target_type | lower }} <b>{{ d.target_name }}</b>
+      · request: <code>{{ d.request_id }}</code>
+    </div>
+  </div>
+  <div class="page-header__actions" data-poll-actions>
+    <form method="post" action="/deployments/{{ d.deployment_uid }}/redispatch" data-poll-action="retry"{% if not redispatchable %} hidden{% endif %}>
+      <button class="btn btn--ghost" title="Re-publish the deploy command (useful if the broker was unavailable the first time).">Retry dispatch</button>
+    </form>
+    <form method="post" action="/deployments/{{ d.deployment_uid }}/stop" data-confirm="Remove the running container? The Docker image and model files will be kept for restart." data-poll-action="stop"{% if not stoppable %} hidden{% endif %}>
+      <button class="btn btn--ghost">{% if effective_status == 'STOPPING' %}Retry stop{% else %}Stop{% endif %}</button>
+    </form>
+    <form method="post" action="/deployments/{{ d.deployment_uid }}/restart" data-confirm="Launch a new container from the cached image and model on the device?" data-poll-action="restart"{% if not restartable %} hidden{% endif %}>
+      <button class="btn">Restart</button>
+    </form>
+    <form method="post" action="/deployments/{{ d.deployment_uid }}/dismiss" data-confirm="Mark this deployment stopped here? Use this if the agent never responded. The container may still be running on the device." data-poll-action="dismiss"{% if not dismissable %} hidden{% endif %}>
+      <button class="btn btn--ghost">Dismiss</button>
+    </form>
+    <form method="post" action="/deployments/{{ d.deployment_uid }}/delete" data-confirm="Delete this deployment? This removes the container, Docker image, and deployment folder on the device, then removes it from your list." data-poll-action="delete"{% if not deletable %} hidden{% endif %}>
+      <button class="btn btn--danger">Delete</button>
+    </form>
+    <a class="btn btn--ghost" href="/apps/{{ d.model_card_uid }}">Open app</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat"><div class="stat__label">Created</div><div class="stat__value" style="font-size:18px">{{ d.created_at | relative }}</div><div class="stat__delta">{{ d.created_at | dt }}</div></div>
+  <div class="stat stat--green"><div class="stat__label">Started</div><div class="stat__value" style="font-size:18px">{{ d.started_at | relative if d.started_at else '—' }}</div></div>
+  <div class="stat stat--amber"><div class="stat__label">Devices</div><div class="stat__value">{{ d.devices | length }}</div></div>
+  <div class="stat stat--slate"><div class="stat__label">Commands</div><div class="stat__value">{{ d.commands | length }}</div></div>
+</div>
+
+{% include "_partials/inference_stream_grid.html" %}
+
+<section class="card">
+  <header class="card__head"><h2>Per-device status</h2></header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>Device</th><th>Status</th><th>Container</th><th>Started</th><th>Updated</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for r in d.devices %}
+          <tr data-poll-device-row="{{ r.device_uid }}">
+            <td><a href="/devices/{{ r.device_uid }}"><b>{{ r.device_name }}</b></a><div class="tiny text-mute">{{ r.device_uid }}</div></td>
+            <td><span class="badge {{ badge_class(r.status) }}" data-poll-device-status>{{ r.status }}</span></td>
+            <td class="mono small" data-poll-device-container>{{ r.container_name or '—' }}{% if r.container_id %} <span class="text-mute">({{ r.container_id[:12] }})</span>{% endif %}</td>
+            <td class="small text-soft">{{ r.started_at | relative if r.started_at else '—' }}</td>
+            <td class="small text-soft" data-poll-device-updated>{{ r.updated_at | relative }}</td>
+            <td class="small" data-poll-device-error>{{ r.error_message or '' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6"><span class="text-mute small">No device rows yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section card">
+  <header class="card__head"><h2>Commands</h2></header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>Operation</th><th>Status</th><th>Topic</th><th>Request</th><th>Created</th><th>Acked</th></tr></thead>
+      <tbody>
+        {% for c in d.commands %}
+          <tr data-poll-command-row="{{ c.request_id }}">
+            <td class="mono small">{{ c.operation }}</td>
+            <td><span class="badge {{ badge_class(c.status) }}" data-poll-command-status>{{ c.status }}</span></td>
+            <td class="mono tiny text-soft">{{ c.topic }}</td>
+            <td class="mono tiny">{{ c.request_id }}</td>
+            <td class="small text-soft">{{ c.created_at | relative }}</td>
+            <td class="small text-soft" data-poll-command-acked>{{ c.acked_at | relative if c.acked_at else '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6"><span class="text-mute small">No commands yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section card">
+  <header class="card__head"><h2>Model card snapshot</h2></header>
+  <div class="card__body">
+    {% if d.card %}
+      <dl class="kv">
+        <dt>App</dt><dd><a href="/apps/{{ d.card.model_card_uid }}">{{ d.card.display_name }} v{{ d.card.version }}</a>{% if d.card.app_id %} <span class="mono tiny text-mute">({{ d.card.app_id }})</span>{% endif %}</dd>
+        <dt>Container image</dt><dd class="mono">{{ d.card.spec.image_repository }}:{{ d.card.spec.image_tag }}</dd>
+        <dt>Container name</dt><dd class="mono">{{ d.card.spec.container_name }}</dd>
+        <dt>Artifact</dt><dd class="mono">{{ d.card.artifact.filename }} → {{ d.card.artifact.container_path }}</dd>
+        <dt>Source</dt><dd>{{ d.card.artifact.source_type }}{% if d.card.artifact.patra_model_card_uuid %} · {{ d.card.artifact.patra_model_card_uuid }}{% endif %}</dd>
+      </dl>
+    {% endif %}
+  </div>
+</section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if inference_streams and inference_streams.enabled %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script src="/static/js/hls-player.js?v=5"></script>
+<script>
+(function () {
+  var root = document.getElementById('inference-streams');
+  if (!root || !window.IcicleHls) return;
+  window.IcicleHls.bootstrapInference(root, {
+    waitingMessage: 'Waiting for inference stream…',
+    connectingMessage: 'Connecting…',
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

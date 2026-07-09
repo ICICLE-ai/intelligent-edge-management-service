@@ -1,0 +1,37 @@
+{% extends "_layout/base.html" %}
+{% block title %}Events · ICICLE Edge{% endblock %}
+{% block topbar_title %}Operations / Events{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1>Event log</h1></div>
+    <div class="page-header__subtitle">Typed audit feed from every service.</div>
+  </div>
+  <div class="tabs">
+    {% for s in ['', 'INFO','WARN','ERROR'] %}
+      <a class="tab {% if severity == s %}is-active{% endif %}" href="/operations/events?severity={{ s }}">{{ s or 'All' }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead><tr><th>Type</th><th>Severity</th><th>Message</th><th>Device</th><th>Deployment</th><th>When</th></tr></thead>
+    <tbody>
+      {% for e in events %}
+        <tr>
+          <td class="mono small">{{ e.event_type }}</td>
+          <td><span class="badge {{ badge_class(e.severity) }}">{{ e.severity }}</span></td>
+          <td class="small">{{ e.message }}</td>
+          <td class="mono tiny text-soft">{% if e.device_uid %}<a href="/devices/{{ e.device_uid }}">{{ e.device_uid }}</a>{% else %}—{% endif %}</td>
+          <td class="mono tiny text-soft">{% if e.deployment_uid %}<a href="/deployments/{{ e.deployment_uid }}">{{ e.deployment_uid }}</a>{% else %}—{% endif %}</td>
+          <td class="small text-soft">{{ e.created_at | relative }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6"><span class="text-mute small">No events yet.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

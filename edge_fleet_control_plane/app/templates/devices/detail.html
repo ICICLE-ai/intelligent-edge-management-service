@@ -1,0 +1,494 @@
+{% extends "_layout/base.html" %}
+{% block title %}{{ device.device_name }} · ICICLE Edge{% endblock %}
+{% block topbar_title %}Devices / {{ device.device_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header" data-poll-device-detail data-poll-url="/api/devices/{{ device.device_uid }}" data-poll-activity-url="/api/devices/{{ device.device_uid }}/activity" data-poll-interval="4000">
+  <div>
+    <div class="page-header__title">
+      <h1 class="title-gradient">{{ device.device_name }}</h1>
+      <span class="badge {{ badge_class(device.status) }}" data-poll-device-status>{{ device.status }}</span>
+    </div>
+    <div class="page-header__subtitle">
+      <span data-copy="{{ device.device_uid }}" class="kbd copy-link" title="Click to copy">{{ device.device_uid }}</span>
+      {% if device.device_alias %} · {{ device.device_alias }}{% endif %}
+      · {{ device.generation_name }}
+      {% if device.group_name %} · <span class="color-dot {{ device.group_color }}"></span>{{ device.group_name }}{% endif %}
+      {% if device.site_name %} · {{ device.site_name }}{% endif %}
+    </div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn btn--outline" href="/devices/{{ device.device_uid }}/installer">Download Installer</a>
+    <form method="post" action="/devices/{{ device.device_uid }}/delete" data-confirm="Delete this device record? This does not uninstall the agent." style="display:inline-block">
+      <button class="btn btn--ghost">Delete</button>
+    </form>
+  </div>
+</div>
+
+{% if show_setup_panel %}
+{% include "_partials/device_setup_panel.html" %}
+{% endif %}
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="stat__label">Last seen</div>
+    <div class="stat__value" style="font-size:18px" data-poll-last-seen>{{ device.last_heartbeat_at | relative }}</div>
+    <div class="stat__delta">{{ device.last_heartbeat_at | dt }}</div>
+  </div>
+  <div class="stat stat--green">
+    <div class="stat__label">Agent version</div>
+    <div class="stat__value" style="font-size:18px">{{ device.agent_version or '—' }}</div>
+    <div class="stat__delta">{{ device.hostname or '—' }} · {{ device.ip_address or '—' }}</div>
+  </div>
+  <div class="stat stat--amber">
+    <div class="stat__label">Active deployments</div>
+    <div class="stat__value">{{ deployments|selectattr('status','in',['RUNNING','DELIVERING','PENDING','STARTING'])|list|length }}</div>
+    <div class="stat__delta">{{ deployments|length }} total</div>
+  </div>
+  <div class="stat stat--slate">
+    <div class="stat__label">Heartbeats</div>
+    <div class="stat__value">{{ heartbeats|length }}</div>
+    <div class="stat__delta">last hour</div>
+  </div>
+</div>
+
+<section class="section card">
+  <header class="card__head">
+    <h2>Run an app</h2>
+    <span class="muted small">Choose from your apps or public apps from other users.</span>
+  </header>
+  <div class="card__body">
+    {% if my_apps or other_apps %}
+      <form method="post" action="/deployments" class="form" data-loading>
+        <input type="hidden" name="target_type" value="DEVICE">
+        <input type="hidden" name="target_uid" value="{{ device.device_uid }}">
+        <input type="hidden" name="redirect_to" value="/devices/{{ device.device_uid }}">
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label">App</label>
+            {% include "_partials/app_select.html" %}
+          </div>
+          <div class="field">
+            <label class="field__label">Notes <span class="text-mute">(optional)</span></label>
+            <input class="input" name="notes" placeholder="Field-trial run #4">
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn--success" data-loading-text="Dispatching…">Deploy to this device</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="empty">
+        <h3>No compatible apps</h3>
+        <p>Publish an app and mark it compatible with <code>{{ device.generation_name }}</code>, or browse public apps from others.</p>
+        <a class="btn" href="/apps/new">Publish App</a>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+{% if active_deployment and inference_streams and inference_streams.enabled %}
+{% include "_partials/inference_stream_grid.html" %}
+{% endif %}
+
+{% if stream and stream.enabled and not (active_deployment and inference_streams and inference_streams.enabled) %}
+<section class="section card" id="live-stream"
+         data-mode="{{ stream.mode }}"
+         {% if stream.mode == 'mediamtx' %}data-hls-url="{{ stream.hls_url }}"{% else %}data-view-url="{{ stream.view_url }}"{% endif %}
+         data-stream-active="{{ 'true' if stream.active else 'false' }}">
+  <header class="card__head">
+    <h2>Live camera</h2>
+    {% if stream.mode == 'mediamtx' %}
+    <span class="muted small">H.264 pushed to MediaMTX over RTSPS, played back as HLS.</span>
+    {% else %}
+    <span class="muted small">Pushed from the device to the control plane over HTTPS, played back as MJPEG.</span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    <div class="grid grid-2">
+      <div>
+        <div class="video-shell" style="background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center">
+          {% if stream.mode == 'mediamtx' %}
+          <video id="live-video-hls" controls autoplay muted playsinline style="width:100%;height:100%;background:#000"></video>
+          {% else %}
+          <img id="live-video" alt="Live camera" style="width:100%;height:100%;object-fit:contain;background:#000;display:none">
+          <p class="tiny text-mute" id="live-placeholder" style="padding:24px;text-align:center">Stream not running.</p>
+          {% endif %}
+        </div>
+        <p class="tiny text-mute" id="live-status" style="margin-top:8px">…</p>
+      </div>
+      <div>
+        <form method="post" action="/devices/{{ device.device_uid }}/stream/start" class="form" data-loading>
+          <div class="field">
+            <label class="field__label">Camera</label>
+            <select class="select" name="camera_type">
+              <option value="csi" {% if stream.default_camera == 'csi' %}selected{% endif %}>CSI · nvarguscamerasrc</option>
+              <option value="usb" {% if stream.default_camera == 'usb' %}selected{% endif %}>USB · v4l2 (/dev/video0)</option>
+            </select>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn btn--success" data-loading-text="Requesting…">Start stream</button>
+          </div>
+        </form>
+        <form method="post" action="/devices/{{ device.device_uid }}/stream/stop" class="form" data-loading style="margin-top:10px">
+          <button class="btn btn--ghost" data-loading-text="Stopping…">Stop stream</button>
+        </form>
+        <dl class="kv" style="margin-top:14px">
+          <dt>Stream path</dt><dd class="mono tiny">{{ stream.path }}</dd>
+          {% if stream.mode == 'mediamtx' %}<dt>HLS URL</dt><dd class="mono tiny" style="word-break:break-all">{{ stream.hls_url }}</dd>{% endif %}
+        </dl>
+        <p class="tiny text-mute">A few seconds of start-up latency is normal while the device opens the camera and the first frames arrive.</p>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% set caps = device.capabilities %}
+<section class="section card">
+  <header class="card__head">
+    <h2>Hardware setup</h2>
+    <span class="muted small">Camera interface and count — used for deploy compatibility and per-camera stream URLs.</span>
+  </header>
+  <div class="card__body">
+    <form method="post" action="/devices/{{ device.device_uid }}/capabilities" class="form" data-loading data-device-capabilities-form>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label">Camera interface</label>
+          <select class="select" name="camera_bus" data-setup-camera-bus>
+            <option value="csi" {% if caps.camera_buses[0] == 'csi' %}selected{% endif %}>Jetson CSI</option>
+            <option value="gige-mvs" {% if caps.camera_buses[0] == 'gige-mvs' %}selected{% endif %}>GigE Hikrobot (MVS)</option>
+            <option value="usb-v4l2" {% if caps.camera_buses[0] == 'usb-v4l2' %}selected{% endif %}>USB (V4L2)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">Camera count</label>
+          <input class="input" name="camera_count" type="number" min="1" max="16" value="{{ caps.camera_count }}" required />
+        </div>
+      </div>
+      <div class="field" data-setup-indices-wrap {% if caps.camera_buses[0] not in ['gige-mvs', 'csi'] or (caps.camera_buses[0] == 'csi' and caps.camera_count < 2) %}hidden{% endif %}>
+        <label class="field__label" data-setup-indices-label>
+          {% if caps.camera_buses[0] == 'gige-mvs' %}MVS camera indices{% else %}CSI sensor indices{% endif %}
+        </label>
+        <input class="input" name="camera_indices" data-setup-camera-indices value="{{ caps.camera_indices | join(',') }}" placeholder="0,1,2"
+          {% if caps.camera_buses[0] == 'gige-mvs' or (caps.camera_buses[0] == 'csi' and caps.camera_count > 1) %}{% else %}disabled{% endif %} />
+        <div class="field__hint" data-setup-indices-hint>
+          {% if caps.camera_buses[0] == 'gige-mvs' %}
+          Only for GigE Hikrobot (MVS). Comma-separated indices — must match camera count.
+          {% else %}
+          nvarguscamerasrc sensor-id values (usually 0, 1, …). Shown when camera count &gt; 1.
+          {% endif %}
+        </div>
+      </div>
+      {% if caps.host_mounts %}
+      <p class="small text-soft">Host mounts on deploy: {% for src, mode in caps.host_mounts.items() %}<code>{{ src }}</code> ({{ mode }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+      {% endif %}
+      <div class="row">
+        <button class="btn btn--ghost" data-loading-text="Saving…">Save hardware setup</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<div class="grid grid-2">
+  {% if not show_setup_panel %}
+  <section class="card">
+    <header class="card__head"><h2>Installation</h2></header>
+    <div class="card__body">
+      <p class="small text-soft">Status: <b>{{ device.status }}</b></p>
+      {% if enrollment %}
+        <dl class="kv">
+          <dt>Token expires</dt><dd class="small">{{ enrollment.expires_at | dt }}</dd>
+          <dt>Used at</dt><dd class="small">{{ enrollment.used_at | dt if enrollment.used_at else 'Not used yet' }}</dd>
+        </dl>
+      {% endif %}
+      <div class="row" style="margin-top:14px">
+        <a class="btn" href="/devices/{{ device.device_uid }}/installer">Download / Regenerate Installer</a>
+      </div>
+      <pre style="margin-top:14px">tar -xzf icicle-edge-agent-{{ device.device_uid }}.tar.gz
+cd icicle-edge-agent
+sudo ./install.sh</pre>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <header class="card__head"><h2>Move / Edit</h2></header>
+    <div class="card__body">
+      <form method="post" action="/devices/{{ device.device_uid }}/edit" data-loading class="form">
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label">Device name</label>
+            <input class="input" name="device_name" value="{{ device.device_name }}" required />
+          </div>
+          <div class="field">
+            <label class="field__label">Device alias</label>
+            <input class="input" name="device_alias" value="{{ device.device_alias or '' }}" />
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label">Group</label>
+            <select class="select" name="group_uid">
+              <option value="">No group</option>
+              {% for g in groups %}
+                <option value="{{ g.group_uid }}" {% if g.group_uid == device.group_uid %}selected{% endif %}>{{ g.group_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label">Site name</label>
+            <input class="input" name="site_name" value="{{ device.site_name or '' }}" />
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn--ghost" data-loading-text="Saving…">Save changes</button>
+        </div>
+      </form>
+      <form method="post" action="/devices/{{ device.device_uid }}/generation" class="form" data-loading style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border)">
+        <div class="field">
+          <label class="field__label">Device generation</label>
+          <select class="select" name="generation_uid" required>
+            {% for g in generations %}
+              <option value="{{ g.generation_uid }}" {% if g.generation_uid == device.generation_uid %}selected{% endif %}>
+                {{ g.display_name }} — {{ g.architecture }}
+              </option>
+            {% endfor %}
+          </select>
+          <div class="field__hint">Controls which apps appear in the deploy list. Must match your Jetson hardware and JetPack.</div>
+        </div>
+        <div class="row">
+          <button class="btn btn--ghost" data-loading-text="Saving…">Update generation</button>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+
+<section class="section card">
+  <header class="card__head">
+    <h2>Deployments on this device</h2>
+  </header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>Model</th><th>Status</th><th>Target</th><th>Started</th><th class="right">Actions</th></tr></thead>
+      <tbody>
+        {% for d in deployments %}
+          <tr data-poll-deployment-row="{{ d.deployment_uid }}">
+            <td>
+              <a href="/deployments/{{ d.deployment_uid }}"><b>{{ d.model_display_name }} v{{ d.model_version }}</b></a>
+              <div class="tiny text-mute">{{ d.deployment_uid }}</div>
+            </td>
+            <td><span class="badge {{ badge_class(d.status) }}" data-poll-list-status>{{ d.status }}</span></td>
+            <td class="small">{{ d.target_type | lower }} · {{ d.target_name }}</td>
+            <td class="small text-soft">{{ d.started_at | relative if d.started_at else d.created_at | relative }}</td>
+            <td class="right" data-poll-deployment-actions>
+              {% set eff = d.effective_status | default(d.status) %}
+              {% set row_stoppable = eff in ['RUNNING', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
+              {% set row_restartable = eff == 'STOPPED' %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/stop" data-confirm="Remove the container? Image and model files are kept for restart." data-poll-action="stop" style="display:inline-block"{% if not row_stoppable %} hidden{% endif %}>
+                <input type="hidden" name="redirect_to" value="/devices/{{ device.device_uid }}">
+                <button class="btn btn--ghost btn--sm">{% if eff == 'STOPPING' %}Retry stop{% else %}Stop{% endif %}</button>
+              </form>
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/restart" data-confirm="Launch a new container from the cached image on the device?" data-poll-action="restart" style="display:inline-block"{% if not row_restartable %} hidden{% endif %}>
+                <input type="hidden" name="redirect_to" value="/devices/{{ device.device_uid }}">
+                <button class="btn btn--ghost btn--sm">Restart</button>
+              </form>
+              {% if d.status != 'CANCELLED' %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/delete" data-confirm="Delete this deployment and clean up the device?" data-poll-action="delete" style="display:inline-block">
+                <input type="hidden" name="redirect_to" value="/devices/{{ device.device_uid }}">
+                <button class="btn btn--danger btn--sm">Delete</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5"><div class="empty"><h3>No deployments yet</h3></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="grid grid-2" style="margin-top:20px">
+  <section class="card">
+    <header class="card__head"><h2>Recent heartbeats</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Status</th><th>CPU</th><th>Memory MB</th><th>GPU °C</th><th>When</th></tr></thead>
+        <tbody>
+          {% for h in heartbeats %}
+            <tr>
+              <td><span class="badge {{ badge_class(h.status) }}">{{ h.status }}</span></td>
+              <td class="small">{{ '%.1f'|format(h.cpu_percent) if h.cpu_percent is not none else '—' }}</td>
+              <td class="small">{{ h.memory_used_mb or '—' }}</td>
+              <td class="small">{{ h.gpu_temp_c or '—' }}</td>
+              <td class="small text-soft">{{ h.received_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5"><span class="text-mute small">No heartbeats yet.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card">
+    <header class="card__head"><h2>Recent events</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Event</th><th>Severity</th><th>Message</th><th>When</th></tr></thead>
+        <tbody>
+          {% for e in events %}
+            <tr>
+              <td class="mono small">{{ e.event_type }}</td>
+              <td><span class="badge {{ badge_class(e.severity) }}">{{ e.severity }}</span></td>
+              <td class="small">{{ e.message }}</td>
+              <td class="small text-soft">{{ e.created_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4"><span class="text-mute small">No events yet.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="section card">
+  <header class="card__head"><h2>Recent commands</h2></header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>Operation</th><th>Status</th><th>Topic</th><th>Request</th><th>When</th></tr></thead>
+      <tbody>
+        {% for c in commands %}
+          <tr data-poll-command-row="{{ c.request_id }}">
+            <td class="mono small">{{ c.operation }}</td>
+            <td><span class="badge {{ badge_class(c.status) }}" data-poll-command-status>{{ c.status }}</span></td>
+            <td class="mono tiny text-soft">{{ c.topic }}</td>
+            <td class="mono tiny">{{ c.request_id }}</td>
+            <td class="small text-soft">{{ c.created_at | relative }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5"><span class="text-mute small">No commands yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/device-setup-wizard.js?v=3"></script>
+{% set show_inference = active_deployment and inference_streams and inference_streams.enabled %}
+{% set show_device_test_stream = stream and stream.enabled and not show_inference %}
+{% if show_inference or (show_device_test_stream and stream.mode == 'mediamtx') %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+{% endif %}
+{% if show_inference %}
+<script src="/static/js/hls-player.js?v=5"></script>
+<script>
+(function () {
+  var root = document.getElementById('inference-streams');
+  if (!root || !window.IcicleHls) return;
+  window.IcicleHls.bootstrapInference(root, {
+    waitingMessage: 'Waiting for inference stream…',
+    connectingMessage: 'Connecting…',
+  });
+})();
+</script>
+{% endif %}
+{% if show_device_test_stream and stream.mode == 'mediamtx' %}
+<script>
+(function () {
+  var root = document.getElementById('live-stream');
+  if (!root) return;
+  var video = document.getElementById('live-video-hls');
+  var statusEl = document.getElementById('live-status');
+  var url = root.dataset.hlsUrl;
+  var active = root.dataset.streamActive === 'true';
+  var hls = null, retryTimer = null;
+
+  function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
+  function scheduleRetry() {
+    if (retryTimer) return;
+    setStatus('Waiting for stream… (device is starting the camera)');
+    retryTimer = setTimeout(function () { retryTimer = null; attach(); }, 4000);
+  }
+  function attach() {
+    if (window.Hls && window.Hls.isSupported()) {
+      if (hls) { hls.destroy(); hls = null; }
+      hls = new Hls({
+        lowLatencyMode: true,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 5,
+        maxLiveSyncPlaybackRate: 1.25,
+        backBufferLength: 0,
+        manifestLoadingMaxRetry: 6,
+      });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+        setStatus('Live'); video.play().catch(function () {});
+      });
+      hls.on(window.Hls.Events.ERROR, function (evt, data) {
+        if (!data || !data.fatal) return;
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && hls) {
+          hls.recoverMediaError();
+          return;
+        }
+        if (hls) { hls.destroy(); hls = null; }
+        scheduleRetry();
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.addEventListener('loadedmetadata', function () { setStatus('Live'); });
+      video.addEventListener('error', scheduleRetry);
+    } else {
+      setStatus('This browser cannot play HLS.');
+    }
+  }
+
+  if (active) { setStatus('Connecting…'); attach(); }
+  else { setStatus('Stream not running. Click “Start stream”.'); }
+})();
+</script>
+{% elif show_device_test_stream %}
+<script>
+(function () {
+  var root = document.getElementById('live-stream');
+  if (!root) return;
+  var img = document.getElementById('live-video');
+  var placeholder = document.getElementById('live-placeholder');
+  var statusEl = document.getElementById('live-status');
+  var url = root.dataset.viewUrl;
+  var active = root.dataset.streamActive === 'true';
+  var retryTimer = null;
+
+  function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
+  function showImg(on) {
+    img.style.display = on ? 'block' : 'none';
+    if (placeholder) placeholder.style.display = on ? 'none' : 'block';
+  }
+
+  function attach() {
+    showImg(true);
+    setStatus('Connecting… (a few seconds of start-up latency is normal)');
+    // Cache-buster so each (re)connect opens a fresh multipart response.
+    img.src = url + '?t=' + Date.now();
+  }
+
+  img.addEventListener('load', function () { setStatus('Live'); });
+  img.addEventListener('error', function () {
+    if (!active) return;
+    showImg(false);
+    setStatus('Waiting for stream… (device is starting the camera)');
+    if (retryTimer) return;
+    retryTimer = setTimeout(function () { retryTimer = null; attach(); }, 4000);
+  });
+
+  if (active) { attach(); }
+  else { showImg(false); setStatus('Stream not running. Click “Start stream”.'); }
+})();
+</script>
+{% endif %}
+{% endblock %}

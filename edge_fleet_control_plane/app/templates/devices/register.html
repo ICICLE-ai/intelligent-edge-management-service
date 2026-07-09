@@ -1,0 +1,68 @@
+{% extends "_layout/base.html" %}
+{% block title %}Register Device · ICICLE Edge{% endblock %}
+{% block topbar_title %}Register Device{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1>Register a new device</h1></div>
+    <div class="page-header__subtitle">A device record is created first. Download the installer and run it on the Jetson to enroll.</div>
+  </div>
+</div>
+
+<form class="card form" method="post" action="/devices" data-loading style="padding:24px;">
+  <div class="field-grid">
+    <div class="field">
+      <label class="field__label" for="device_name">Device name</label>
+      <input class="input" id="device_name" name="device_name" placeholder="Apple Farm Jetson 1" required />
+    </div>
+    <div class="field">
+      <label class="field__label" for="device_alias">Device alias <span class="text-mute">(optional, unique to you)</span></label>
+      <input class="input" id="device_alias" name="device_alias" placeholder="jetson-001" />
+    </div>
+  </div>
+  <div class="field-grid">
+    <div class="field">
+      <label class="field__label" for="generation_uid">Device generation</label>
+      <select class="select" id="generation_uid" name="generation_uid" required>
+        {% for g in generations %}
+          <option value="{{g.generation_uid}}">{{g.display_name}} — {{g.architecture}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label class="field__label" for="group_uid">Device group</label>
+      <select class="select" id="group_uid" name="group_uid">
+        <option value="">No group</option>
+        {% for g in groups %}
+          <option value="{{g.group_uid}}">{{g.group_name}}{% if g.site_name %} — {{g.site_name}}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label class="field__label" for="site_name">Site name</label>
+    <input class="input" id="site_name" name="site_name" placeholder="e.g. Acme Orchard, Lab B" />
+    <div class="field__hint">Used for filtering and on-device labels.</div>
+  </div>
+  <div class="field-grid">
+    <div class="field">
+      <label class="field__label" for="camera_bus">Camera interface</label>
+      <select class="select" id="camera_bus" name="camera_bus">
+        <option value="csi">Jetson CSI (nvarguscamerasrc)</option>
+        <option value="gige-mvs">GigE Hikrobot (MVS SDK)</option>
+        <option value="usb-v4l2">USB (V4L2) — Pi / generic</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="field__label" for="camera_count">Camera count</label>
+      <input class="input" id="camera_count" name="camera_count" type="number" min="1" max="16" value="1" />
+      <div class="field__hint">Used for multi-stream HLS grid and ingest URL injection.</div>
+    </div>
+  </div>
+  <div class="row">
+    <button class="btn" data-loading-text="Registering…">Register Device</button>
+    <a class="btn btn--ghost" href="/devices">Cancel</a>
+  </div>
+</form>
+{% endblock %}

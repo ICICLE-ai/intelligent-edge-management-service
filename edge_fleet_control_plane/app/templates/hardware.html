@@ -1,0 +1,35 @@
+{% extends "_layout/base.html" %}
+{% block title %}Supported Hardware · ICICLE Edge{% endblock %}
+{% block topbar_title %}Supported Hardware{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Supported hardware</h1></div>
+    <div class="page-header__subtitle">Device generations available for registration and model compatibility.</div>
+  </div>
+  {% if request.state.is_admin %}
+  <div class="page-header__actions">
+    <a class="btn btn--outline" href="/admin/hardware">Manage catalog</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead><tr><th>Generation</th><th>Hardware</th><th>Architecture</th><th>Memory</th><th>Storage</th><th>Runtime</th></tr></thead>
+    <tbody>
+      {% for g in generations %}
+        <tr>
+          <td><b>{{ g.display_name }}</b><div class="tiny text-mute">{{ g.generation_uid }}</div></td>
+          <td class="small">{{ g.hardware_type }}</td>
+          <td class="small">{{ g.architecture }}</td>
+          <td class="small">{{ g.memory_mb or '—' }} MB</td>
+          <td class="small">{{ g.storage_gb or '—' }} GB</td>
+          <td class="small">{{ g.default_runtime or '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

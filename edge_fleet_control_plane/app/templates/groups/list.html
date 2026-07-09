@@ -1,0 +1,60 @@
+{% extends "_layout/base.html" %}
+{% block title %}Device Groups · ICICLE Edge{% endblock %}
+{% block topbar_title %}Device Groups{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Device groups</h1></div>
+    <div class="page-header__subtitle">Group devices to deploy a model to several Jetsons in one click.</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <header class="card__head"><h2>Create a group</h2></header>
+    <div class="card__body">
+      <form class="form" method="post" action="/groups" data-loading>
+        <div class="field"><label class="field__label">Group name</label><input class="input" name="group_name" required></div>
+        <div class="field-grid">
+          <div class="field"><label class="field__label">Site name</label><input class="input" name="site_name"></div>
+          <div class="field">
+            <label class="field__label">Color tag</label>
+            <select class="select" name="color_tag">
+              {% for c in ['indigo','violet','emerald','amber','rose','sky','cyan','fuchsia'] %}
+                <option value="{{c}}">{{c}}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="field"><label class="field__label">Description</label><textarea class="textarea" name="description" rows="3"></textarea></div>
+        <div class="row"><button class="btn" data-loading-text="Creating…">Create group</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head"><h2>Your groups</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Group</th><th>Site</th><th>Devices</th><th>Online</th></tr></thead>
+        <tbody>
+          {% for g in groups %}
+            <tr>
+              <td>
+                <a href="/groups/{{ g.group_uid }}"><span class="color-dot {{ g.color_tag }}"></span><b>{{ g.group_name }}</b></a>
+                {% if g.description %}<div class="tiny text-mute">{{ g.description }}</div>{% endif %}
+              </td>
+              <td class="small">{{ g.site_name or '—' }}</td>
+              <td class="small">{{ g.device_count or 0 }}</td>
+              <td class="small">{{ g.online_count or 0 }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4"><div class="empty"><h3>No groups yet</h3></div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

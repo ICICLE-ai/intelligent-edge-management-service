@@ -1,0 +1,42 @@
+{# Inference live streams from deployed containers (MediaMTX HLS). #}
+{% if inference_streams and inference_streams.enabled %}
+<section class="section card" id="inference-streams">
+  <header class="card__head">
+    <h2>{{ inference_stream_title | default('Inference live stream') }}</h2>
+    <span class="muted small">{{ inference_stream_subtitle | default('Annotated model output pushed from the running container over RTSPS.') }}</span>
+  </header>
+  <div class="card__body">
+    {% if inference_streams.tiles %}
+    <div class="cctv-grid cctv-grid--{% set n = inference_streams.tiles | length %}{% if n <= 1 %}1{% elif n == 2 %}2{% elif n == 3 %}3{% elif n == 4 %}4{% else %}many{% endif %}">
+      {% for tile in inference_streams.tiles %}
+      <div class="cctv-tile{% if tile.active %} cctv-tile--live{% endif %}"
+           data-hls-url="{{ tile.hls_url }}"
+           data-stream-active="{{ 'true' if tile.active else 'false' }}"
+           data-device-uid="{{ tile.device_uid }}"
+           {% if tile.camera_index is not none %}data-camera-index="{{ tile.camera_index }}"{% endif %}>
+        <div class="cctv-tile__head">
+          <span class="cctv-tile__name">{{ tile.device_name }}</span>
+          <span class="badge {{ badge_class(tile.status) }}" data-inference-badge data-status="{{ tile.status }}">{{ tile.status }}</span>
+        </div>
+        <div class="cctv-tile__viewport" data-inference-viewport
+             style="position:relative;aspect-ratio:16/9;background:#0b1220;overflow:hidden">
+          <div class="cctv-tile__placeholder" data-inference-placeholder
+               style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center;z-index:1;background:#0b1220;{% if tile.active %}display:none{% endif %}">
+            <p class="tiny text-mute">Stream available when container is RUNNING</p>
+          </div>
+          <video controls autoplay muted playsinline data-inference-video
+                 style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:2;{% if not tile.active %}display:none{% endif %}"></video>
+        </div>
+        <p class="cctv-tile__status tiny text-mute" data-hls-status>{% if tile.active %}Connecting…{% else %}&nbsp;{% endif %}</p>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <h3>No devices in this deployment</h3>
+      <p>Inference streams appear here once containers reach RUNNING.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}

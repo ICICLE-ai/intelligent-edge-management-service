@@ -1,0 +1,142 @@
+{% extends "_layout/base.html" %}
+{% block title %}Set Up Device · ICICLE Edge{% endblock %}
+{% block topbar_title %}Fleet / Set Up Device{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Set up a new device</h1></div>
+    <div class="page-header__subtitle">
+      Choose hardware, configure cameras, then install the agent on your Jetson. We'll walk you through each step.
+    </div>
+  </div>
+</div>
+
+<form class="setup-wizard card" method="post" action="/devices" data-loading data-device-setup-wizard data-current-step="1" style="padding:0; overflow:hidden;">
+  <nav class="setup-wizard__steps" aria-label="Setup progress">
+    <ol class="setup-steps">
+      <li class="setup-steps__item is-active" data-step-nav="1"><span class="setup-steps__num">1</span> Hardware</li>
+      <li class="setup-steps__item" data-step-nav="2"><span class="setup-steps__num">2</span> Cameras</li>
+      <li class="setup-steps__item" data-step-nav="3"><span class="setup-steps__num">3</span> Identity</li>
+      <li class="setup-steps__item" data-step-nav="4"><span class="setup-steps__num">4</span> Review</li>
+    </ol>
+  </nav>
+
+  <div class="setup-wizard__body">
+
+    <!-- Step 1: Generation -->
+    <section class="setup-panel is-active" data-step-panel="1">
+      <header class="setup-panel__head">
+        <h2>Select device generation</h2>
+        <p class="text-soft small">Pick the Jetson model and JetPack generation. This controls compatible apps and TensorRT engines.</p>
+      </header>
+      <div class="device-grid">
+        {% for g in generations %}
+        <label class="device-tile">
+          <input type="radio" name="generation_uid" value="{{ g.generation_uid }}" {% if loop.first %}required{% endif %}>
+          <div class="device-tile__head">
+            <span class="device-tile__name">{{ g.display_name }}</span>
+            <span class="device-tile__check" aria-hidden="true">✓</span>
+          </div>
+          <div class="device-tile__meta">{{ g.architecture }} · {{ g.device_family or 'Edge' }}</div>
+          {% if g.description %}
+          <p class="device-tile__desc small text-soft">{{ g.description }}</p>
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Step 2: Cameras -->
+    <section class="setup-panel" data-step-panel="2" hidden>
+      <header class="setup-panel__head">
+        <h2>Camera configuration</h2>
+        <p class="text-soft small">Used for multi-stream HLS grids and per-camera ingest URL injection on deploy.</p>
+      </header>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label" for="camera_bus">Camera interface</label>
+          <select class="select" id="camera_bus" name="camera_bus" data-setup-camera-bus>
+            <option value="csi">Jetson CSI (nvarguscamerasrc)</option>
+            <option value="gige-mvs">GigE Hikrobot (MVS SDK)</option>
+            <option value="usb-v4l2">USB (V4L2) — Pi / generic</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label" for="camera_count">Camera count</label>
+          <input class="input" id="camera_count" name="camera_count" type="number" min="1" max="16" value="1" data-setup-camera-count required />
+        </div>
+      </div>
+      <div class="field" data-setup-indices-wrap hidden>
+        <label class="field__label" for="camera_indices" data-setup-indices-label>MVS camera indices</label>
+        <input class="input" id="camera_indices" name="camera_indices" value="0" placeholder="0,1,2" data-setup-camera-indices disabled />
+        <div class="field__hint" data-setup-indices-hint>Only for GigE Hikrobot (MVS). Comma-separated indices into the MVS device list — must match camera count.</div>
+      </div>
+      <p class="small text-soft" data-setup-mount-hint hidden>GigE MVS apps mount <code>/opt/MVS</code> from the host read-only.</p>
+    </section>
+
+    <!-- Step 3: Identity -->
+    <section class="setup-panel" data-step-panel="3" hidden>
+      <header class="setup-panel__head">
+        <h2>Device identity</h2>
+        <p class="text-soft small">Name the device and optionally assign it to a group or site.</p>
+      </header>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label" for="device_name">Device name</label>
+          <input class="input" id="device_name" name="device_name" placeholder="Apple Farm Jetson 1" required />
+        </div>
+        <div class="field">
+          <label class="field__label" for="device_alias">Device alias <span class="text-mute">(optional)</span></label>
+          <input class="input" id="device_alias" name="device_alias" placeholder="jetson-001" />
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label" for="group_uid">Device group</label>
+          <select class="select" id="group_uid" name="group_uid">
+            <option value="">No group</option>
+            {% for g in groups %}
+              <option value="{{ g.group_uid }}">{{ g.group_name }}{% if g.site_name %} — {{ g.site_name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label" for="site_name">Site name</label>
+          <input class="input" id="site_name" name="site_name" placeholder="e.g. Acme Orchard, Lab B" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 4: Review -->
+    <section class="setup-panel" data-step-panel="4" hidden>
+      <header class="setup-panel__head">
+        <h2>Review &amp; create</h2>
+        <p class="text-soft small">Confirm your choices. After creation you'll download the agent installer and verify enrollment.</p>
+      </header>
+      <dl class="kv setup-review" data-setup-review>
+        <dt>Generation</dt><dd data-review="generation">—</dd>
+        <dt>Cameras</dt><dd data-review="cameras">—</dd>
+        <dt>Device name</dt><dd data-review="name">—</dd>
+        <dt>Group</dt><dd data-review="group">—</dd>
+        <dt>Site</dt><dd data-review="site">—</dd>
+      </dl>
+    </section>
+  </div>
+
+  <footer class="setup-wizard__footer">
+    <div class="setup-wizard__footer-left">
+      <button type="button" class="btn btn--ghost" data-setup-back>Back</button>
+      <a class="btn btn--ghost" href="/devices" data-setup-cancel>Cancel</a>
+    </div>
+    <div class="setup-wizard__footer-right">
+      <button type="button" class="btn" data-setup-next>Continue</button>
+      <button type="submit" class="btn btn--success" data-setup-submit data-loading-text="Creating device…">Create device</button>
+    </div>
+  </footer>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/device-setup-wizard.js?v=3"></script>
+{% endblock %}

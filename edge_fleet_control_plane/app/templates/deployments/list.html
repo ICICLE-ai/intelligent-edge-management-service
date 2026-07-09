@@ -1,0 +1,68 @@
+{% extends "_layout/base.html" %}
+{% block title %}Deployments · ICICLE Edge{% endblock %}
+{% block topbar_title %}Deployments{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Deployments</h1></div>
+    <div class="page-header__subtitle">Every "run this model on this target" instruction.</div>
+  </div>
+  <div class="tabs">
+    <a class="tab {% if scope == 'active' %}is-active{% endif %}" href="/deployments?scope=active">Active</a>
+    <a class="tab {% if scope == 'all' %}is-active{% endif %}" href="/deployments?scope=all">All</a>
+  </div>
+</div>
+
+{% if deployments %}
+<div class="card" data-poll-deployments-list data-poll-url="/api/deployments?scope={{ scope }}">
+  <table class="table">
+    <thead><tr><th>Model</th><th>Target</th><th>Status</th><th>Created</th><th>Started</th><th class="right">Actions</th></tr></thead>
+    <tbody>
+      {% for d in deployments %}
+        <tr data-poll-list-row="{{ d.deployment_uid }}">
+          <td>
+            <a href="/deployments/{{ d.deployment_uid }}"><b>{{ d.model_display_name }} v{{ d.model_version }}</b></a>
+            <div class="tiny text-mute">{{ d.deployment_uid }}</div>
+          </td>
+          <td class="small">{{ d.target_type | lower }} · {{ d.target_name }}</td>
+          <td><span class="badge {{ badge_class(d.status) }}" data-poll-list-status>{{ d.status }}</span></td>
+          <td class="small text-soft">{{ d.created_at | relative }}</td>
+          <td class="small text-soft">{{ d.started_at | relative if d.started_at else '—' }}</td>
+          <td class="right">
+            {% if d.status in ['STOPPING', 'STARTING', 'DELIVERING', 'DOWNLOADING', 'PULLING', 'PENDING', 'RECORDED', 'MQTT_FAILED', 'MQTT_SENT'] %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/stop" data-confirm="Send stop again to the device?" style="display:inline-block">
+                <button class="btn btn--ghost btn--sm">{% if d.status == 'STOPPING' %}Retry stop{% else %}Stop{% endif %}</button>
+              </form>
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/dismiss" data-confirm="Mark stopped in the control plane?" style="display:inline-block">
+                <button class="btn btn--ghost btn--sm">Dismiss</button>
+              </form>
+            {% elif d.status not in ['STOPPED','FAILED','CANCELLED'] %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/stop" data-confirm="Remove the container? Image and model files are kept for restart." style="display:inline-block">
+                <button class="btn btn--ghost btn--sm">Stop</button>
+              </form>
+            {% elif d.status == 'STOPPED' %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/restart" data-confirm="Launch a new container from the cached image on the device?" style="display:inline-block">
+                <button class="btn btn--ghost btn--sm">Restart</button>
+              </form>
+            {% endif %}
+            {% if d.status != 'CANCELLED' %}
+              <form method="post" action="/deployments/{{ d.deployment_uid }}/delete" data-confirm="Delete this deployment and clean up the device (container, image, and files)?" style="display:inline-block">
+                <button class="btn btn--danger btn--sm">Delete</button>
+              </form>
+            {% endif %}
+            <a class="btn btn--ghost btn--sm" href="/deployments/{{ d.deployment_uid }}">Open</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <h3>No deployments yet</h3>
+  <p>Choose a model card and deploy it from a device or group page.</p>
+  <a class="btn" href="/apps">Browse Apps</a>
+</div>
+{% endif %}
+{% endblock %}

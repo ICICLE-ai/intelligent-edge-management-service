@@ -1,0 +1,456 @@
+{% extends "_layout/base.html" %}
+{% block title %}{% if mode == 'create' %}Publish App{% else %}Edit App{% endif %} · ICICLE Edge{% endblock %}
+{% block topbar_title %}{% if mode == 'create' %}Apps / Publish{% else %}Apps / Edit{% endif %}{% endblock %}
+
+{% macro val(key) -%}{{ form.get(key) or '' }}{%- endmacro %}
+{% macro is_checked(key) -%}{% if form.get(key) %}checked{% endif %}{%- endmacro %}
+
+{% set selected_compat = (form.get('compat_generation_uid') or []) %}
+{% if selected_compat is string %}{% set selected_compat = [selected_compat] %}{% endif %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">{% if mode == 'create' %}Publish a new app{% else %}Edit app{% endif %}</h1></div>
+    <div class="page-header__subtitle">
+      Paste your <code>docker run</code> command and optional Patra model UUID — we'll parse the rest and
+      route weights through the agent's designated <code>${DEPLOYMENT_DIR}/model</code> mount.
+    </div>
+  </div>
+</div>
+
+{% if errors %}
+<div class="notice notice--danger">
+  <div>
+    <b>We couldn't save the app:</b>
+    <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+</div>
+{% endif %}
+
+<form method="post"
+      action="{% if mode == 'create' %}/apps{% else %}/apps/{{ card.model_card_uid }}/edit{% endif %}"
+      class="form" data-loading data-model-form style="display:grid; gap:20px;">
+
+  <!-- ============================================================
+       1. Quick start: the only fields a researcher MUST fill in.
+       ============================================================ -->
+  <fieldset class="fieldset fieldset--accent">
+    <div class="fieldset__head">
+      <h2>Quick start</h2>
+      <span class="fieldset__hint">Patra UUID, docker command, model path, supported devices.</span>
+    </div>
+
+    <div class="field-grid">
+      <div class="field">
+        <label class="field__label">Patra model card UUID <span class="text-mute">(optional weights source)</span></label>
+        <input class="input mono" name="patra_model_card_uuid"
+               placeholder="56a980ad-ca95-430f-817a-09d93b90d7aa"
+               value="{{ val('patra_model_card_uuid') }}"
+               pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}">
+        <div class="field__hint">Links to Patra model weights. Multiple apps can share the same Patra model.</div>
+      </div>
+      <div class="field">
+        <label class="field__label">Path of the model file inside the container</label>
+        <input class="input mono" data-model-container-path
+               placeholder="/workspace/models/unetpp_teacher_512x768_fp16.engine"
+               value="{{ val('artifact_container_path') }}">
+        <div class="field__hint">
+          The agent always downloads to <code class="mono">${DEPLOYMENT_DIR}/model/&lt;filename&gt;</code>
+          and mounts that directory at the matching point in your command.
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field__label"><code>docker run</code> command</label>
+      <textarea class="textarea mono" name="raw_docker_command" data-docker-command rows="10"
+                placeholder="docker run -d --name infer --runtime nvidia --gpus all \\&#10;  -e ENGINE_PATH=/workspace/models/model.engine \\&#10;  -v /local/path:/workspace/models:ro \\&#10;  yourorg/your-image:latest">{{ val('raw_docker_command') }}</textarea>
+      <div class="field__hint">Paste the command exactly as you'd run it. We'll parse env vars, mounts, ports, and flags into the fields below.</div>
+    </div>
+
+    <div class="field">
+      <label class="field__label">Compatible device generations</label>
+      <div class="device-grid">
+        {% for g in generations %}
+          <label class="device-tile {% if g.generation_uid in selected_compat %}is-checked{% endif %}">
+            <input type="checkbox" name="compat_generation_uid" value="{{ g.generation_uid }}"
+                   {% if g.generation_uid in selected_compat %}checked{% endif %}>
+            <div class="device-tile__head">
+              <span class="device-tile__name">{{ g.display_name }}</span>
+              <span class="device-tile__check">✓</span>
+            </div>
+            <div class="device-tile__meta">
+              <span>{{ g.hardware_type }}</span>
+              {% if g.memory_mb %}<span>· {{ g.memory_mb }} MB</span>{% endif %}
+              {% if g.storage_gb %}<span>· {{ g.storage_gb }} GB</span>{% endif %}
+            </div>
+          </label>
+        {% else %}
+          <div class="text-mute small">No generations are seeded yet. Add one under Hardware.</div>
+        {% endfor %}
+      </div>
+      <div class="field__hint">Pick every Jetson generation this model is compatible with. The portal blocks deployments to incompatible devices.</div>
+    </div>
+
+    <div class="field">
+      <div class="row row--between">
+        <label class="field__label">What we'll execute on the device</label>
+        <button type="button" class="btn btn--ghost btn--sm" data-copy-target="[data-docker-preview]">Copy</button>
+      </div>
+      <pre class="code-preview" data-docker-preview>—</pre>
+      <ul class="notice notice--warning notice--inline" data-docker-warnings hidden></ul>
+    </div>
+  </fieldset>
+
+  <!-- ============================================================
+       2. Catalog identity
+       ============================================================ -->
+  <fieldset class="fieldset">
+    <div class="fieldset__head"><h2>App identity</h2><span class="fieldset__hint">Visible in the app catalog. App ID is assigned automatically on publish.</span></div>
+    {% if mode == 'edit' and card and card.app_id %}
+    <div class="field">
+      <label class="field__label">App ID</label>
+      <input class="input mono" value="{{ card.app_id }}" readonly>
+      <div class="field__hint">System-assigned — share this ID in logs and support tickets.</div>
+    </div>
+    {% endif %}
+    <div class="field-grid">
+      <div class="field">
+        <label class="field__label">Display name</label>
+        <input class="input" name="display_name" required value="{{ val('display_name') }}">
+      </div>
+      <div class="field">
+        <label class="field__label">Version</label>
+        <input class="input mono" name="version" placeholder="1.0.0" required value="{{ val('version') }}">
+      </div>
+      <div class="field">
+        <label class="field__label">Status</label>
+        <select class="select" name="status">
+          {% for s in ['DRAFT','PUBLISHED','DEPRECATED'] %}
+            <option value="{{s}}" {% if (val('status') or 'PUBLISHED') == s %}selected{% endif %}>{{s}}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label">Visibility</label>
+        <select class="select" name="visibility">
+          <option value="private" {% if (val('visibility') or 'private') == 'private' %}selected{% endif %}>Private — only you can deploy</option>
+          <option value="public" {% if val('visibility') == 'public' %}selected{% endif %}>Public — others can deploy from "Other apps"</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-grid">
+      <div class="field">
+        <label class="field__label">Task type</label>
+        <input class="input" name="task_type" placeholder="segmentation / classification / detection" value="{{ val('task_type') }}">
+      </div>
+      <div class="field">
+        <label class="field__label">Framework</label>
+        <input class="input" name="framework" placeholder="tensorrt / pytorch / onnx" value="{{ val('framework') }}">
+      </div>
+      <div class="field">
+        <label class="field__label">License</label>
+        <input class="input" name="license" placeholder="Apache-2.0" value="{{ val('license') }}">
+      </div>
+      <div class="field">
+        <label class="field__label">Homepage URL</label>
+        <input class="input" name="homepage_url" placeholder="https://…" value="{{ val('homepage_url') }}">
+      </div>
+    </div>
+    <div class="field">
+      <label class="field__label">Description</label>
+      <textarea class="textarea" name="description" rows="3">{{ val('description') }}</textarea>
+    </div>
+    <div class="field">
+      <label class="field__label">Tags</label>
+      <input class="input" name="tags" placeholder="agriculture, tensorrt, fp16" value="{{ val('tags') }}">
+      <div class="field__hint">Comma separated.</div>
+    </div>
+  </fieldset>
+
+  <!-- ============================================================
+       3. Advanced details (auto-populated; researcher can tweak)
+       ============================================================ -->
+  <details class="advanced" {% if errors %}open{% endif %}>
+    <summary>
+      <span class="advanced__label">Advanced — auto-filled from your docker command</span>
+      <span class="advanced__hint">Open to verify or override any parsed value.</span>
+    </summary>
+
+    <!-- Artifact ----------------------------------------------------->
+    <fieldset class="fieldset" data-artifact-source>
+      <div class="fieldset__head">
+        <h2>Artifact</h2>
+        <span class="fieldset__hint">Where the model weights live and what the agent should download.</span>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label">Filename on device</label>
+          <input class="input mono" name="artifact_filename" placeholder="model.engine" value="{{ val('artifact_filename') }}">
+          <div class="field__hint">Derived from the container path below.</div>
+        </div>
+        <div class="field">
+          <label class="field__label">Container path</label>
+          <input class="input mono" name="artifact_container_path" placeholder="/workspace/models/model.engine" value="{{ val('artifact_container_path') }}">
+          <div class="field__hint">Mirrors the field at the top of the form.</div>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label">Source</label>
+        <div class="row">
+          <label class="checkbox"><input type="radio" name="artifact_source_type" value="patra" {% if (val('artifact_source_type') or 'patra') == 'patra' %}checked{% endif %}> Patra (resolved at deploy time)</label>
+          <label class="checkbox"><input type="radio" name="artifact_source_type" value="url" {% if val('artifact_source_type') == 'url' %}checked{% endif %}> Direct download URL</label>
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field" data-source-for="url">
+          <label class="field__label">Download URL</label>
+          <input class="input mono" name="artifact_download_url" placeholder="https://…" value="{{ val('artifact_download_url') }}">
+        </div>
+      </div>
+      <div class="field-grid field-grid--3">
+        <div class="field">
+          <label class="field__label">Content type</label>
+          <input class="input" name="artifact_content_type" placeholder="application/octet-stream" value="{{ val('artifact_content_type') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Size (bytes)</label>
+          <input class="input" name="artifact_size_bytes" type="number" min="0" value="{{ val('artifact_size_bytes') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">SHA-256</label>
+          <input class="input mono" name="artifact_sha256" value="{{ val('artifact_sha256') }}">
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label">Notes</label>
+        <textarea class="textarea" name="artifact_notes" rows="2">{{ val('artifact_notes') }}</textarea>
+      </div>
+    </fieldset>
+
+    <!-- Container --------------------------------------------------->
+    <fieldset class="fieldset">
+      <div class="fieldset__head"><h2>Container</h2><span class="fieldset__hint">Auto-filled from <code>docker run</code> flags.</span></div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label">Image registry</label>
+          <input class="input mono" name="spec_image_registry" placeholder="docker.io / ghcr.io" value="{{ val('spec_image_registry') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Image repository</label>
+          <input class="input mono" name="spec_image_repository" placeholder="org/image" value="{{ val('spec_image_repository') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Image tag</label>
+          <input class="input mono" name="spec_image_tag" placeholder="latest" value="{{ val('spec_image_tag') or 'latest' }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Image digest</label>
+          <input class="input mono" name="spec_image_digest" placeholder="sha256:…" value="{{ val('spec_image_digest') }}">
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label">Container name</label>
+          <input class="input mono" name="spec_container_name" value="{{ val('spec_container_name') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Model env var</label>
+          <input class="input mono" name="spec_model_env_var" placeholder="ENGINE_PATH" value="{{ val('spec_model_env_var') }}">
+          <div class="field__hint">Env var that receives the in-container path of the downloaded model.</div>
+        </div>
+      </div>
+      <div class="field-grid field-grid--4">
+        <div class="field">
+          <label class="field__label">Pull policy</label>
+          <select class="select" name="spec_pull_policy">
+            {% for v in ['if_not_present','always','never'] %}
+              <option value="{{v}}" {% if (val('spec_pull_policy') or 'if_not_present') == v %}selected{% endif %}>{{v}}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">Restart policy</label>
+          <select class="select" name="spec_restart_policy">
+            {% for v in ['no','on-failure','always','unless-stopped'] %}
+              <option value="{{v}}" {% if (val('spec_restart_policy') or 'no') == v %}selected{% endif %}>{{v}}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">Runtime</label>
+          <input class="input" name="spec_runtime" placeholder="nvidia" value="{{ val('spec_runtime') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">GPUs</label>
+          <input class="input" name="spec_gpus" placeholder="all" value="{{ val('spec_gpus') }}">
+        </div>
+      </div>
+      <div class="field-grid field-grid--4">
+        <div class="field">
+          <label class="field__label">Network mode</label>
+          <input class="input" name="spec_network_mode" placeholder="host / bridge / none" value="{{ val('spec_network_mode') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">IPC mode</label>
+          <input class="input" name="spec_ipc_mode" placeholder="host / shareable" value="{{ val('spec_ipc_mode') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">shm-size</label>
+          <input class="input" name="spec_shm_size" placeholder="1g" value="{{ val('spec_shm_size') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Working directory</label>
+          <input class="input mono" name="spec_working_dir" value="{{ val('spec_working_dir') }}">
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field field--row">
+          <label class="checkbox"><input type="checkbox" name="spec_privileged" value="on" {{ is_checked('spec_privileged') }}> Run as <code>--privileged</code></label>
+          <label class="checkbox"><input type="checkbox" name="spec_remove_after_exit" value="on" {{ is_checked('spec_remove_after_exit') }}> <code>--rm</code> after exit</label>
+        </div>
+      </div>
+    </fieldset>
+
+    <!-- Env --------------------------------------------------------->
+    <fieldset class="fieldset" data-repeater data-repeater-name="env">
+      <div class="fieldset__head"><h2>Environment variables</h2><button type="button" class="btn btn--ghost btn--sm" data-repeater-add>+ Add variable</button></div>
+      <div class="repeater" data-repeater-list>
+        {% set keys = form.get('env_key') or [] %}
+        {% set vals = form.get('env_value') or [] %}
+        {% set secrets = form.get('env_is_secret') or [] %}
+        {% if keys is string %}{% set keys = [keys] %}{% endif %}
+        {% if vals is string %}{% set vals = [vals] %}{% endif %}
+        {% for i in range(keys|length) %}
+          <div class="repeater__row">
+            <input class="input mono" style="grid-column: span 4" name="env_key" placeholder="ENV_KEY" value="{{ keys[i] }}">
+            <input class="input mono" style="grid-column: span 6" name="env_value" placeholder="value" value="{{ vals[i] }}">
+            <label class="checkbox" style="grid-column: span 1">
+              <input type="checkbox" name="env_is_secret" value="{{ i }}" {% if i|string in secrets %}checked{% endif %}> secret
+            </label>
+            <button type="button" class="repeater__rm" style="grid-column: span 1" data-repeater-remove>Remove</button>
+          </div>
+        {% endfor %}
+      </div>
+      <template data-repeater-template>
+        <div class="repeater__row">
+          <input class="input mono" style="grid-column: span 4" name="env_key" placeholder="ENV_KEY">
+          <input class="input mono" style="grid-column: span 6" name="env_value" placeholder="value">
+          <label class="checkbox" style="grid-column: span 1"><input type="checkbox" name="env_is_secret" value="new"> secret</label>
+          <button type="button" class="repeater__rm" style="grid-column: span 1" data-repeater-remove>Remove</button>
+        </div>
+      </template>
+    </fieldset>
+
+    <!-- Mounts ------------------------------------------------------>
+    <fieldset class="fieldset" data-repeater data-repeater-name="mounts">
+      <div class="fieldset__head">
+        <h2>Mounts</h2>
+        <div class="row">
+          <span class="fieldset__hint">The model mount uses <code>${DEPLOYMENT_DIR}/model</code> — the agent fills it at deploy time.</span>
+          <button type="button" class="btn btn--ghost btn--sm" data-repeater-add>+ Add mount</button>
+        </div>
+      </div>
+      <div class="repeater" data-repeater-list>
+        {% set ms = form.get('mount_source') or [] %}
+        {% set mt = form.get('mount_target') or [] %}
+        {% set msty = form.get('mount_style') or [] %}
+        {% set mty = form.get('mount_type') or [] %}
+        {% set mmo = form.get('mount_mode') or [] %}
+        {% if ms is string %}{% set ms = [ms] %}{% endif %}
+        {% for i in range(ms|length) %}
+          <div class="repeater__row">
+            <input class="input mono" style="grid-column: span 4" name="mount_source" placeholder="source" value="{{ ms[i] }}">
+            <input class="input mono" style="grid-column: span 4" name="mount_target" placeholder="target" value="{{ mt[i] if i < mt|length else '' }}">
+            <select class="select" style="grid-column: span 1" name="mount_style">
+              {% for s in ['volume','mount'] %}<option value="{{s}}" {% if (msty[i] if i < msty|length else '') == s %}selected{% endif %}>{{s}}</option>{% endfor %}
+            </select>
+            <select class="select" style="grid-column: span 1" name="mount_type">
+              {% for s in ['bind','volume','tmpfs'] %}<option value="{{s}}" {% if (mty[i] if i < mty|length else '') == s %}selected{% endif %}>{{s}}</option>{% endfor %}
+            </select>
+            <select class="select" style="grid-column: span 1" name="mount_mode">
+              <option value="" {% if not (mmo[i] if i < mmo|length else '') %}selected{% endif %}></option>
+              <option value="ro" {% if (mmo[i] if i < mmo|length else '') == 'ro' %}selected{% endif %}>ro</option>
+              <option value="rw" {% if (mmo[i] if i < mmo|length else '') == 'rw' %}selected{% endif %}>rw</option>
+            </select>
+            <button type="button" class="repeater__rm" style="grid-column: span 1" data-repeater-remove>Remove</button>
+          </div>
+        {% endfor %}
+      </div>
+      <template data-repeater-template>
+        <div class="repeater__row">
+          <input class="input mono" style="grid-column: span 4" name="mount_source" placeholder="source">
+          <input class="input mono" style="grid-column: span 4" name="mount_target" placeholder="target">
+          <select class="select" style="grid-column: span 1" name="mount_style"><option value="volume">volume</option><option value="mount">mount</option></select>
+          <select class="select" style="grid-column: span 1" name="mount_type"><option value="bind">bind</option><option value="volume">volume</option><option value="tmpfs">tmpfs</option></select>
+          <select class="select" style="grid-column: span 1" name="mount_mode"><option value=""></option><option value="ro">ro</option><option value="rw">rw</option></select>
+          <button type="button" class="repeater__rm" style="grid-column: span 1" data-repeater-remove>Remove</button>
+        </div>
+      </template>
+    </fieldset>
+
+    <!-- Docker args + ports side-by-side ---------------------------->
+    <div class="grid grid-2">
+      <fieldset class="fieldset" data-repeater data-repeater-name="docker_args">
+        <div class="fieldset__head">
+          <h2>Extra docker args</h2>
+          <button type="button" class="btn btn--ghost btn--sm" data-repeater-add>+ Add arg</button>
+        </div>
+        <div class="repeater" data-repeater-list>
+          {% set args = form.get('docker_arg') or [] %}
+          {% if args is string %}{% set args = [args] %}{% endif %}
+          {% for a in args %}
+            <div class="repeater__row">
+              <input class="input mono" style="grid-column: span 10" name="docker_arg" placeholder="--cap-add" value="{{a}}">
+              <button type="button" class="repeater__rm" style="grid-column: span 2" data-repeater-remove>Remove</button>
+            </div>
+          {% endfor %}
+        </div>
+        <template data-repeater-template>
+          <div class="repeater__row">
+            <input class="input mono" style="grid-column: span 10" name="docker_arg" placeholder="--cap-add">
+            <button type="button" class="repeater__rm" style="grid-column: span 2" data-repeater-remove>Remove</button>
+          </div>
+        </template>
+      </fieldset>
+
+      <fieldset class="fieldset" data-repeater data-repeater-name="ports">
+        <div class="fieldset__head">
+          <h2>Port mappings</h2>
+          <button type="button" class="btn btn--ghost btn--sm" data-repeater-add>+ Add port</button>
+        </div>
+        <div class="repeater" data-repeater-list>
+          {% set hp = form.get('port_host') or [] %}
+          {% set cp = form.get('port_container') or [] %}
+          {% set pp = form.get('port_protocol') or [] %}
+          {% if hp is string %}{% set hp = [hp] %}{% endif %}
+          {% for i in range(cp|length) %}
+            <div class="repeater__row">
+              <input class="input mono" style="grid-column: span 4" name="port_host" placeholder="host" value="{{ hp[i] if i < hp|length else '' }}">
+              <input class="input mono" style="grid-column: span 4" name="port_container" placeholder="container" value="{{ cp[i] }}">
+              <select class="select" style="grid-column: span 2" name="port_protocol">
+                {% for s in ['tcp','udp'] %}<option value="{{s}}" {% if (pp[i] if i < pp|length else '') == s %}selected{% endif %}>{{s}}</option>{% endfor %}
+              </select>
+              <button type="button" class="repeater__rm" style="grid-column: span 2" data-repeater-remove>Remove</button>
+            </div>
+          {% endfor %}
+        </div>
+        <template data-repeater-template>
+          <div class="repeater__row">
+            <input class="input mono" style="grid-column: span 4" name="port_host" placeholder="host">
+            <input class="input mono" style="grid-column: span 4" name="port_container" placeholder="container">
+            <select class="select" style="grid-column: span 2" name="port_protocol"><option value="tcp">tcp</option><option value="udp">udp</option></select>
+            <button type="button" class="repeater__rm" style="grid-column: span 2" data-repeater-remove>Remove</button>
+          </div>
+        </template>
+      </fieldset>
+    </div>
+  </details>
+
+  <div class="row" style="margin-top:8px">
+    <button class="btn btn--lg" data-loading-text="Saving…">{% if mode == 'create' %}Publish app{% else %}Save changes{% endif %}</button>
+    <a class="btn btn--ghost" href="/apps">Cancel</a>
+  </div>
+</form>
+{% endblock %}

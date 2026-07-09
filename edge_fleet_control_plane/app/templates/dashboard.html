@@ -1,0 +1,125 @@
+{% extends "_layout/base.html" %}
+{% block title %}Dashboard · ICICLE Edge{% endblock %}
+{% block topbar_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Fleet at a glance</h1></div>
+    <div class="page-header__subtitle">Operational view of your registered Jetson devices and active app deployments.</div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn btn--outline" href="/devices/setup">Set Up Device</a>
+    <a class="btn" href="/apps/new">Publish App</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="stat__label">Devices</div>
+    <div class="stat__value">{{ counts.devices.total }}</div>
+    <div class="stat__delta">{{ counts.devices.online }} online · {{ counts.devices.offline }} offline</div>
+    <div class="stat__icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+    </div>
+  </div>
+  <div class="stat stat--green">
+    <div class="stat__label">Online</div>
+    <div class="stat__value">{{ counts.devices.online }}</div>
+    <div class="stat__delta">{{ counts.devices.total - counts.devices.online }} not online</div>
+    <div class="stat__icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+  </div>
+  <div class="stat stat--amber">
+    <div class="stat__label">Active deployments</div>
+    <div class="stat__value">{{ counts.deployments.active }}</div>
+    <div class="stat__delta">{{ counts.deployments.total }} total</div>
+    <div class="stat__icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+  </div>
+  <div class="stat stat--slate">
+    <div class="stat__label">Published apps</div>
+    <div class="stat__value">{{ counts.models }}</div>
+    <div class="stat__delta">Ready to deploy</div>
+    <div class="stat__icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/></svg></div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <header class="card__head">
+      <h2>Recent devices</h2>
+      <a class="muted" href="/devices">View all →</a>
+    </header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Device</th><th>Generation</th><th>Status</th><th>Last seen</th></tr></thead>
+        <tbody>
+          {% for d in devices %}
+            <tr>
+              <td>
+                <a href="/devices/{{d.device_uid}}"><b>{{d.device_name}}</b></a>
+                <div class="tiny text-mute">{{ d.device_uid }}{% if d.device_alias %} · {{ d.device_alias }}{% endif %}</div>
+              </td>
+              <td class="small">{{ d.generation_name or '—' }}</td>
+              <td><span class="badge {{ badge_class(d.status) }}">{{ d.status }}</span></td>
+              <td class="small text-soft">{{ d.last_heartbeat_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4"><div class="empty"><h3>No devices yet</h3><p>Register your first Jetson to get started.</p><a class="btn" href="/devices/setup">Set Up Device</a></div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head">
+      <h2>Recent deployments</h2>
+      <a class="muted" href="/deployments">View all →</a>
+    </header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Model</th><th>Target</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody>
+          {% for d in deployments %}
+            <tr>
+              <td>
+                <a href="/deployments/{{d.deployment_uid}}"><b>{{ d.model_display_name }} v{{ d.model_version }}</b></a>
+                <div class="tiny text-mute">{{ d.deployment_uid }}</div>
+              </td>
+              <td class="small">{{ d.target_type | lower }} · {{ d.target_name }}</td>
+              <td><span class="badge {{ badge_class(d.status) }}">{{ d.status }}</span></td>
+              <td class="small text-soft">{{ d.created_at | relative }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4"><div class="empty"><h3>No deployments yet</h3><p>Publish an app and dispatch it to a device or group.</p><a class="btn" href="/apps">Browse Apps</a></div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="section card">
+  <header class="card__head">
+    <h2>Recent events</h2>
+    <a class="muted" href="/operations/events">Event log →</a>
+  </header>
+  <div class="card__body" style="padding:0">
+    <table class="table table--compact">
+      <thead><tr><th>Type</th><th>Severity</th><th>Message</th><th>When</th></tr></thead>
+      <tbody>
+        {% for e in events %}
+          <tr>
+            <td class="mono small">{{ e.event_type }}</td>
+            <td><span class="badge {{ badge_class(e.severity) }}">{{ e.severity }}</span></td>
+            <td class="small">{{ e.message }}</td>
+            <td class="small text-soft">{{ e.created_at | relative }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4"><div class="empty"><h3>Quiet so far</h3><p>Events from devices, deployments and the agent show up here.</p></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,32 @@
+{
+  "pod_id": "edgemediahls",
+  "image": "docker.io/habg21/edge-mediamtx-hls:latest",
+  "template": "",
+  "description": "ICICLE Edge live-stream HLS playback (MediaMTX). Pulls from edgemediaingest over RTSPS and serves LL-HLS to browsers on 443.",
+  "command": null,
+  "arguments": null,
+  "environment_variables": {},
+  "secret_map": {},
+  "status_requested": "ON",
+  "volume_mounts": {},
+  "time_to_stop_default": -1,
+  "networking": {
+    "default": {
+      "protocol": "http",
+      "port": 8888,
+      "ip_allow_list": [],
+      "tapis_auth": false,
+      "tapis_auth_allowed_users": ["*"]
+    }
+  },
+  "resources": {
+    "cpu_request": 500,
+    "cpu_limit": 2000,
+    "mem_request": 256,
+    "mem_limit": 1024,
+    "ephemeral_storage_request": -1,
+    "ephemeral_storage_limit": -1,
+    "gpus": 0
+  },
+  "compute_queue": "default"
+}

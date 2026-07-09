@@ -1,0 +1,198 @@
+{% extends "_layout/base.html" %}
+{% block title %}{{ card.display_name }} · ICICLE Edge{% endblock %}
+{% block topbar_title %}Apps / {{ card.display_name }}{% endblock %}
+
+{% block content %}
+{% set spec = card.spec or {} %}
+{% set artifact = card.artifact or {} %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title">
+      <h1>{{ card.display_name }} <span class="text-mute">v{{ card.version }}</span></h1>
+      <span class="badge {{ badge_class(card.status) }}">{{ card.status }}</span>
+      <span class="badge {% if card.visibility == 'public' %}badge--green{% else %}badge--grey{% endif %}">{{ (card.visibility or 'private') | upper }}</span>
+    </div>
+    <div class="page-header__subtitle">
+      {% if card.app_id %}
+        App ID <span data-copy="{{ card.app_id }}" class="kbd copy-link mono">{{ card.app_id }}</span>
+        ·
+      {% endif %}
+      <span data-copy="{{ card.model_card_uid }}" class="kbd copy-link">{{ card.model_card_uid }}</span>
+      {% if card.patra_model_card_uuid %}
+        · Patra <span data-copy="{{ card.patra_model_card_uuid }}" class="mono small copy-link">{{ card.patra_model_card_uuid }}</span>
+      {% endif %}
+      {% if card.task_type %} · {{ card.task_type }}{% endif %}
+      {% if card.framework %} · {{ card.framework }}{% endif %}
+      {% if card.license %} · {{ card.license }}{% endif %}
+    </div>
+  </div>
+  <div class="page-header__actions">
+    {% if is_owner %}
+    <a class="btn btn--ghost" href="/apps/{{ card.model_card_uid }}/edit">Edit</a>
+    {% if card.status != 'PUBLISHED' %}
+      <form method="post" action="/apps/{{ card.model_card_uid }}/publish" style="display:inline-block">
+        <button class="btn btn--success">Publish</button>
+      </form>
+    {% else %}
+      <form method="post" action="/apps/{{ card.model_card_uid }}/draft" style="display:inline-block">
+        <button class="btn btn--ghost">Move to draft</button>
+      </form>
+      <form method="post" action="/apps/{{ card.model_card_uid }}/deprecate" style="display:inline-block">
+        <button class="btn btn--ghost">Deprecate</button>
+      </form>
+    {% endif %}
+    <form method="post" action="/apps/{{ card.model_card_uid }}/delete" data-confirm="Delete this app? This cannot be undone." style="display:inline-block">
+      <button class="btn btn--ghost">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if card.description %}
+<section class="card"><div class="card__body">{{ card.description }}</div></section>
+{% endif %}
+
+{% if card.raw_docker_command %}
+<section class="card" style="margin-top:18px">
+  <header class="card__head row--between">
+    <h2>Researcher's docker command</h2>
+    <button class="btn btn--ghost btn--sm" data-copy-target="[data-card-docker-command]">Copy</button>
+  </header>
+  <div class="card__body">
+    <pre class="code-preview" data-card-docker-command>{{ card.raw_docker_command }}</pre>
+    <div class="text-mute small" style="margin-top:6px">
+      The model mount is rewritten to <code class="mono">${DEPLOYMENT_DIR}/model</code> when the agent runs it.
+      {% if card.tags and 'gige-mvs' in card.tags %}
+      Requires <code class="mono">/opt/MVS</code> on the host. On fleet deploy the control plane injects
+      <code class="mono">STREAM_INGEST_URL_0..N</code> and <code class="mono">CAMERA_INDICES</code> from the device's
+      GigE hardware setup (camera count + MVS indices) — those vars are not stored on the model card.
+      {% elif card.tags and 'csi' in card.tags and 'multi-camera' in card.tags %}
+      On fleet deploy the control plane injects <code class="mono">STREAM_INGEST_URL_0..N</code> and
+      <code class="mono">CAMERA_INDICES</code> (CSI sensor-id values) from the device's hardware setup —
+      those vars are not stored on the model card.
+      {% elif card.tags and 'multi-camera' in card.tags %}
+      For fleet deploy, the control plane injects <code class="mono">STREAM_INGEST_URL_0..N</code> plus
+      <code class="mono">CAMERA_INDICES</code> from the device's hardware setup — those vars are not stored on the model card.
+      {% else %}
+      Live stream ingest URLs (<code class="mono">STREAM_INGEST_URL</code>) are injected on fleet deploy when MediaMTX is enabled.
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<div class="grid grid-2" style="margin-top:18px">
+
+  <section class="card">
+    <header class="card__head"><h2>Artifact</h2></header>
+    <div class="card__body">
+      <dl class="kv">
+        <dt>Filename</dt><dd class="mono">{{ artifact.filename }}</dd>
+        <dt>Container path</dt><dd class="mono">{{ artifact.container_path }}</dd>
+        <dt>Source</dt><dd><span class="badge badge--blue">{{ artifact.source_type }}</span></dd>
+        {% if artifact.patra_model_card_uuid %}<dt>Patra UUID</dt><dd class="mono small" data-copy="{{ artifact.patra_model_card_uuid }}">{{ artifact.patra_model_card_uuid }}</dd>{% endif %}
+        {% if artifact.download_url %}<dt>Download URL</dt><dd class="mono small">{{ artifact.download_url }}</dd>{% endif %}
+        {% if artifact.size_bytes %}<dt>Size</dt><dd>{{ artifact.size_bytes }} bytes</dd>{% endif %}
+        {% if artifact.sha256 %}<dt>SHA-256</dt><dd class="mono small">{{ artifact.sha256 }}</dd>{% endif %}
+        {% if artifact.notes %}<dt>Notes</dt><dd>{{ artifact.notes }}</dd>{% endif %}
+      </dl>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head"><h2>Container</h2></header>
+    <div class="card__body">
+      <dl class="kv">
+        <dt>Image</dt><dd class="mono">{% if spec.image_registry %}{{ spec.image_registry }}/{% endif %}{{ spec.image_repository }}:{{ spec.image_tag }}{% if spec.image_digest %}@{{ spec.image_digest }}{% endif %}</dd>
+        <dt>Container name</dt><dd class="mono">{{ spec.container_name }}</dd>
+        <dt>Pull policy</dt><dd>{{ spec.pull_policy }}</dd>
+        <dt>Restart</dt><dd>{{ spec.restart_policy }}</dd>
+        {% if spec.runtime %}<dt>Runtime</dt><dd>{{ spec.runtime }}</dd>{% endif %}
+        {% if spec.gpus %}<dt>GPUs</dt><dd>{{ spec.gpus }}</dd>{% endif %}
+        {% if spec.network_mode %}<dt>Network</dt><dd>{{ spec.network_mode }}</dd>{% endif %}
+        {% if spec.ipc_mode %}<dt>IPC</dt><dd>{{ spec.ipc_mode }}</dd>{% endif %}
+        {% if spec.privileged %}<dt>Privileged</dt><dd>yes</dd>{% endif %}
+        {% if spec.shm_size %}<dt>shm-size</dt><dd>{{ spec.shm_size }}</dd>{% endif %}
+        {% if spec.working_dir %}<dt>Working dir</dt><dd class="mono">{{ spec.working_dir }}</dd>{% endif %}
+        {% if spec.model_env_var %}<dt>Model env var</dt><dd class="mono">{{ spec.model_env_var }}</dd>{% endif %}
+      </dl>
+    </div>
+  </section>
+
+</div>
+
+<div class="grid grid-2" style="margin-top:18px">
+  <section class="card">
+    <header class="card__head"><h2>Environment ({{ (spec.env or [])|length }})</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Key</th><th>Value</th><th>Secret</th></tr></thead>
+        <tbody>
+          {% for e in spec.env or [] %}
+            <tr>
+              <td class="mono small">{{ e.var_key }}</td>
+              <td class="mono small">{% if e.is_secret %}••••••••{% else %}{{ e.var_value }}{% endif %}</td>
+              <td>{% if e.is_secret %}<span class="badge badge--violet">secret</span>{% else %}<span class="text-mute small">no</span>{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="text-mute small">No environment variables.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head"><h2>Mounts ({{ (spec.mounts or [])|length }})</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Source</th><th>Target</th><th>Style</th><th>Mode</th></tr></thead>
+        <tbody>
+          {% for m in spec.mounts or [] %}
+            <tr>
+              <td class="mono small">{{ m.source }}</td>
+              <td class="mono small">{{ m.target }}</td>
+              <td class="small">{{ m.mount_style }} · {{ m.mount_type }}</td>
+              <td class="small">{{ m.mode or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="text-mute small">No mounts.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-2" style="margin-top:18px">
+  <section class="card">
+    <header class="card__head"><h2>Docker args ({{ (spec.docker_args or [])|length }})</h2></header>
+    <div class="card__body">
+      {% if spec.docker_args %}
+        <pre>{% for a in spec.docker_args %}{{ a.arg }}{% if not loop.last %} {% endif %}{% endfor %}</pre>
+      {% else %}<span class="text-mute small">No extra docker args.</span>{% endif %}
+    </div>
+  </section>
+  <section class="card">
+    <header class="card__head"><h2>Compatibility ({{ (card.compatibility or [])|length }})</h2></header>
+    <div class="card__body" style="padding:0">
+      <table class="table table--compact">
+        <thead><tr><th>Generation</th><th>Min memory</th><th>Min storage</th><th>CUDA</th><th>Notes</th></tr></thead>
+        <tbody>
+          {% for c in card.compatibility or [] %}
+            <tr>
+              <td><b>{{ c.generation_name }}</b><div class="tiny text-mute">{{ c.generation_uid }}</div></td>
+              <td class="small">{{ c.min_memory_mb or '—' }} MB</td>
+              <td class="small">{{ c.min_storage_gb or '—' }} GB</td>
+              <td>{% if c.requires_cuda %}<span class="badge badge--blue">required</span>{% else %}<span class="text-mute small">no</span>{% endif %}</td>
+              <td class="small">{{ c.notes or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="text-mute small">No compatibility constraints — model is open to any generation.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

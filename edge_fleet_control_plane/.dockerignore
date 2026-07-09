@@ -1,0 +1,15 @@
+edgeopsenv/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+data/
+.env
+.git/
+.gitignore
+.cursor/
+tests/
+*.md
+deploy/env.production
+agent-transcripts/

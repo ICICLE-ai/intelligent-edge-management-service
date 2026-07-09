@@ -1,0 +1,42 @@
+{
+  "pod_id": "edgemediaingest",
+  "image": "bluenviron/mediamtx:latest",
+  "template": "",
+  "description": "ICICLE Edge live-stream RTSP ingest (MediaMTX). Single TCP port exposed on 443, mirroring the mosquitto broker pattern.",
+  "command": null,
+  "arguments": null,
+  "environment_variables": {
+    "MTX_LOGLEVEL": "info",
+    "MTX_API": "no",
+    "MTX_METRICS": "no",
+    "MTX_RTMP": "no",
+    "MTX_SRT": "no",
+    "MTX_WEBRTC": "no",
+    "MTX_HLS": "no",
+    "MTX_RTSP": "yes",
+    "MTX_RTSPADDRESS": ":8554",
+    "MTX_RTSPTRANSPORTS": "tcp",
+    "MTX_RTSPENCRYPTION": "no"
+  },
+  "secret_map": {},
+  "status_requested": "ON",
+  "volume_mounts": {},
+  "time_to_stop_default": -1,
+  "networking": {
+    "default": {
+      "protocol": "tcp",
+      "port": 8554,
+      "ip_allow_list": []
+    }
+  },
+  "resources": {
+    "cpu_request": 500,
+    "cpu_limit": 2000,
+    "mem_request": 256,
+    "mem_limit": 1024,
+    "ephemeral_storage_request": -1,
+    "ephemeral_storage_limit": -1,
+    "gpus": 0
+  },
+  "compute_queue": "default"
+}

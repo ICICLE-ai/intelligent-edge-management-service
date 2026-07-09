@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connecting… · Intelligent Edge Management Service</title>
+  <link rel="stylesheet" href="/static/css/app.css?v=10" />
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f4f6f8; }
+    .embed-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    .embed-card { max-width: 480px; width: 100%; background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+    .embed-card h1 { margin: 0 0 8px; font-size: 1.25rem; }
+    .embed-card p { margin: 0; color: #64748b; line-height: 1.5; }
+    .embed-error { margin-top: 16px; color: #b91c1c; display: none; }
+  </style>
+</head>
+<body>
+  <div class="embed-shell">
+    <div class="embed-card">
+      <h1>Connecting to Tapis…</h1>
+      <p id="embed-status">Using your existing Tapis UI session.</p>
+      <p id="embed-error" class="embed-error"></p>
+    </div>
+  </div>
+  <script>
+    window.__IEMS_PORTAL_AUTH__ = {
+      next: {{ next | tojson }},
+      portalOrigins: {{ portal_origins | tojson }},
+    };
+  </script>
+  <script src="/static/js/portal-auth.js"></script>
+</body>
+</html>
