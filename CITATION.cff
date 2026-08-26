@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Intelligent Edge Management Service"
+version: "0.1.0"
+license: "BSD-3-Clause"
+authors:
+  - family-names: "Subramoni"
+    given-names: "Hari"
+    email: "subramoni.1@osu.edu"
+repository-code: "https://github.com/ICICLE-ai/intelligent-edge-management-service"
+keywords:
+  - "open source"
+  - "scientific software"
+  - "ICICLE"

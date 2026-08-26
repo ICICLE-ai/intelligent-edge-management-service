@@ -10,8 +10,6 @@ For guidance on what to include in Tutorials, How-To Guides, Explanation, and Re
 
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-yellow.svg)](https://github.com/ICICLE-ai/intelligent-edge-management-service?tab=BSD-3-Clause-1-ov-file)
 
-> **Note:** Add a `LICENSE` file at the repository root if one is not already present. Update the badge URL to match the chosen license.
-
 ## References
 
 - [ICICLE Edge Fleet Control Plane — System Overview](edge_fleet_control_plane/deploy/SYSTEM_OVERVIEW.md)
