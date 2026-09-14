@@ -162,5 +162,61 @@
     "compatibility": [
       {"generation_uid": "jetson-agx-xavier-jp4-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "Engine must be built on JP4 Xavier (TRT 7). MVS SDK required on host at /opt/MVS."}
     ]
+  },
+  {
+    "model_card_uid": "mc_seed_yolo_cnw_live",
+    "app_id": "app_seed_yolo_cnw_live",
+    "visibility": "public",
+    "slug": "yolo-cnw-live",
+    "display_name": "Crop Weed YOLO CNW (Live Stream)",
+    "version": "1.0.0",
+    "task_type": "object detection",
+    "framework": "pytorch",
+    "description": "Custom-trained YOLO model for detecting crops and weeds in agricultural images, with annotated RTSPS live stream for the ICICLE portal. Designed for Dell PowerEdge GPU servers. Portal injects STREAM_INGEST_URL on deploy. Inbound video is handled inside the container.",
+    "license": "private",
+    "homepage_url": "https://huggingface.co/habg21/yolo-cnw",
+    "tags": ["agriculture", "object detection", "yolo", "live-stream", "rtsp"],
+    "status": "PUBLISHED",
+    "patra_model_card_uuid": "b404980f-438a-4760-b358-f6325e6c8f2d",
+    "raw_docker_command": "docker run -d --name yolo_cnw_live --runtime nvidia --gpus all --network host --ipc host -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -e MODEL_PATH=/workspace/models/Yolo-cnw.pt -e STREAM_FPS=15 -e STREAM_WIDTH=480 -e STREAM_HEIGHT=320 -e STREAM_BITRATE_KBPS=1800 -v /opt/models/yolo-cnw:/workspace/models:ro habg21/ara-yolo-cnw-live:latest\n\n# Fleet deploy: portal injects STREAM_INGEST_URL as rtsps://<ingest-host>/cam-<device_uid>. Do not store that URL on the model card.\n# Manual test — replace device_uid and ingest host:\ndocker run -d --name yolo_cnw_live --runtime nvidia --gpus all --network host --ipc host -e MODEL_PATH=/workspace/models/Yolo-cnw.pt -e STREAM_INGEST_URL=rtsps://<ingest-host>/cam-<device_uid> -e STREAM_FPS=15 -v /opt/models/yolo-cnw:/workspace/models:ro habg21/ara-yolo-cnw-live:latest",
+    "artifact": {
+      "filename": "Yolo-cnw.pt",
+      "container_path": "/workspace/models/Yolo-cnw.pt",
+      "source_type": "patra",
+      "patra_model_card_uuid": "b404980f-438a-4760-b358-f6325e6c8f2d",
+      "download_url": "https://huggingface.co/habg21/yolo-cnw/resolve/main/Yolo-cnw.pt",
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/ara-yolo-cnw-live",
+      "image_tag": "latest",
+      "container_name": "yolo_cnw_live",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": false,
+      "model_env_var": "MODEL_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "ipc_mode": "host",
+      "privileged": false,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "compute,utility",
+        "STREAM_FPS": "15",
+        "STREAM_WIDTH": "480",
+        "STREAM_HEIGHT": "320",
+        "STREAM_BITRATE_KBPS": "1800",
+        "CONFIDENCE": "0.25",
+        "IOU": "0.45",
+        "DEVICE": "0",
+        "HALF": "1"
+      },
+      "mounts": [
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model", "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "dell-poweredge-gpu-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "linux/amd64 CUDA 12.4 image. NVIDIA Container Toolkit required. STREAM_INGEST_URL is injected on deploy."}
+    ]
   }
 ]

@@ -73,6 +73,10 @@
       {% elif card.tags and 'multi-camera' in card.tags %}
       For fleet deploy, the control plane injects <code class="mono">STREAM_INGEST_URL_0..N</code> plus
       <code class="mono">CAMERA_INDICES</code> from the device's hardware setup — those vars are not stored on the model card.
+      {% elif card.tags and 'rtsp' in card.tags %}
+      On fleet deploy the control plane injects
+      <code class="mono">STREAM_INGEST_URL</code> (<code class="mono">cam-{device_uid}</code>) when MediaMTX is enabled —
+      that var is not stored on the model card. Inbound video is handled by the container.
       {% else %}
       Live stream ingest URLs (<code class="mono">STREAM_INGEST_URL</code>) are injected on fleet deploy when MediaMTX is enabled.
       {% endif %}

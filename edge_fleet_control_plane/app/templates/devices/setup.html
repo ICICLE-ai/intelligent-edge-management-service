@@ -28,7 +28,7 @@
     <section class="setup-panel is-active" data-step-panel="1">
       <header class="setup-panel__head">
         <h2>Select device generation</h2>
-        <p class="text-soft small">Pick the Jetson model and JetPack generation. This controls compatible apps and TensorRT engines.</p>
+        <p class="text-soft small">Pick the hardware generation. This controls compatible apps (Jetson CSI/TensorRT vs PowerEdge GPU/RTSP).</p>
       </header>
       <div class="device-grid">
         {% for g in generations %}
@@ -51,7 +51,7 @@
     <section class="setup-panel" data-step-panel="2" hidden>
       <header class="setup-panel__head">
         <h2>Camera configuration</h2>
-        <p class="text-soft small">Used for multi-stream HLS grids and per-camera ingest URL injection on deploy.</p>
+        <p class="text-soft small">Used for app compatibility and per-camera ingest URL injection on deploy.</p>
       </header>
       <div class="field-grid">
         <div class="field">
@@ -60,6 +60,7 @@
             <option value="csi">Jetson CSI (nvarguscamerasrc)</option>
             <option value="gige-mvs">GigE Hikrobot (MVS SDK)</option>
             <option value="usb-v4l2">USB (V4L2) — Pi / generic</option>
+            <option value="rtsp">Wireless video (no local camera)</option>
           </select>
         </div>
         <div class="field">
@@ -138,5 +139,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/device-setup-wizard.js?v=3"></script>
+<script src="/static/js/device-setup-wizard.js?v=5"></script>
 {% endblock %}

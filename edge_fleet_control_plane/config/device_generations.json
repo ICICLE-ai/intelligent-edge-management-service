@@ -73,5 +73,20 @@
     "storage_gb": 256,
     "description": "NVIDIA Jetson AGX Orin developer kit — Ampere GPU, up to 64 GB.",
     "is_active": true
+  },
+  {
+    "generation_uid": "dell-poweredge-gpu-v1",
+    "display_name": "Dell PowerEdge (GPU)",
+    "vendor": "Dell",
+    "device_family": "PowerEdge",
+    "hardware_type": "dell-poweredge-gpu",
+    "architecture": "x86_64",
+    "cuda_supported": true,
+    "default_runtime": "nvidia",
+    "cpu_cores": 16,
+    "memory_mb": 65536,
+    "storage_gb": 512,
+    "description": "Dell PowerEdge x86_64 server with NVIDIA GPU and NVIDIA Container Toolkit.",
+    "is_active": true
   }
 ]

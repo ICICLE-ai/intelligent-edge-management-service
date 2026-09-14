@@ -50,12 +50,14 @@ r = client.get("/api/device-generations")
 assert r.status_code == 200, r.text
 gens = r.json()
 assert any(g["generation_uid"] == "jetson-orin-nano-v1" for g in gens), gens
+assert any(g["generation_uid"] == "dell-poweredge-gpu-v1" for g in gens), gens
 
 # Seeded model card present and published
 r = client.get("/api/models")
 assert r.status_code == 200, r.text
 published_models = r.json()
 assert any(m["model_card_uid"] == "mc_seed_unetpp" for m in published_models), published_models
+assert any(m["model_card_uid"] == "mc_seed_yolo_cnw_live" for m in published_models), published_models
 
 # --------------------------------------------------------------------------- #
 # Group + Device CRUD                                                         #

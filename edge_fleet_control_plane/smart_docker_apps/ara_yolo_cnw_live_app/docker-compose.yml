@@ -1,0 +1,29 @@
+services:
+  yolo-cnw-stream:
+    build:
+      context: .
+      network: host
+    image: habg21/ara-yolo-cnw-live:latest
+    runtime: nvidia
+    ipc: host
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ${MODEL_HOST_PATH:-./models}:/workspace/models:ro
+    environment:
+      SOURCE: ${SOURCE:-/workspace/input-h264.sdp}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      STREAM_INGEST_URL: ${STREAM_INGEST_URL:-}
+      MODEL_PATH: ${MODEL_PATH:-/workspace/models/Yolo-cnw.pt}
+      DEVICE: ${DEVICE:-0}
+      HALF: ${HALF:-1}
+      CONFIDENCE: ${CONFIDENCE:-0.25}
+      IOU: ${IOU:-0.45}
+      IMAGE_SIZE: ${IMAGE_SIZE:-640}
+      STREAM_FPS: ${STREAM_FPS:-15}
+      STREAM_BITRATE_KBPS: ${STREAM_BITRATE_KBPS:-1800}
+      STREAM_WIDTH: ${STREAM_WIDTH:-480}
+      STREAM_HEIGHT: ${STREAM_HEIGHT:-320}
+      INPUT_WIDTH: ${INPUT_WIDTH:-480}
+      INPUT_HEIGHT: ${INPUT_HEIGHT:-320}

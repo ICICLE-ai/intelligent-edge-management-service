@@ -208,7 +208,7 @@ def setup_readiness(
         {
             "id": "installer",
             "label": "Agent installer downloaded",
-            "detail": "Run install.sh on the Jetson as root",
+            "detail": "Run install.sh on the device as root",
             "done": installer_done,
         },
         {

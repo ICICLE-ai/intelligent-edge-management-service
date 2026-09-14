@@ -159,6 +159,7 @@
             <option value="csi" {% if caps.camera_buses[0] == 'csi' %}selected{% endif %}>Jetson CSI</option>
             <option value="gige-mvs" {% if caps.camera_buses[0] == 'gige-mvs' %}selected{% endif %}>GigE Hikrobot (MVS)</option>
             <option value="usb-v4l2" {% if caps.camera_buses[0] == 'usb-v4l2' %}selected{% endif %}>USB (V4L2)</option>
+            <option value="rtsp" {% if caps.camera_buses[0] == 'rtsp' %}selected{% endif %}>Wireless video (no local camera)</option>
           </select>
         </div>
         <div class="field">
@@ -378,7 +379,7 @@ sudo ./install.sh</pre>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/device-setup-wizard.js?v=3"></script>
+<script src="/static/js/device-setup-wizard.js?v=5"></script>
 {% set show_inference = active_deployment and inference_streams and inference_streams.enabled %}
 {% set show_device_test_stream = stream and stream.enabled and not show_inference %}
 {% if show_inference or (show_device_test_stream and stream.mode == 'mediamtx') %}

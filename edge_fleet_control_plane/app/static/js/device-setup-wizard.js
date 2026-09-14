@@ -156,7 +156,14 @@
     bindCameraBusForm(form);
 
     form.querySelectorAll('input[name="generation_uid"]').forEach((input) => {
-      input.addEventListener("change", () => syncTileChecks(form));
+      input.addEventListener("change", () => {
+        syncTileChecks(form);
+        const bus = form.querySelector("[data-setup-camera-bus]");
+        if (bus && input.value.indexOf("poweredge") !== -1) {
+          bus.value = "rtsp";
+          updateCameraFields(form);
+        }
+      });
     });
 
     const count = form.querySelector("[data-setup-camera-count]");

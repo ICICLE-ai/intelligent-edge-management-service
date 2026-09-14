@@ -42,10 +42,14 @@ echo ">> installing systemd unit…"
 sudo cp      "$SRC_DIR/systemd/icicle-edge-agent.service" \
              /etc/systemd/system/icicle-edge-agent.service
 
-echo ">> installing X11 hook (xhost at GUI login for Docker camera access)…"
-sudo cp      "$SRC_DIR/x11/99-icicle-docker-xhost.sh" \
-             /etc/X11/Xsession.d/99-icicle-docker-xhost
-sudo chmod 755 /etc/X11/Xsession.d/99-icicle-docker-xhost
+if [ -d /etc/X11/Xsession.d ]; then
+  echo ">> installing X11 hook (xhost at GUI login for Docker camera access)…"
+  sudo cp      "$SRC_DIR/x11/99-icicle-docker-xhost.sh" \
+               /etc/X11/Xsession.d/99-icicle-docker-xhost
+  sudo chmod 755 /etc/X11/Xsession.d/99-icicle-docker-xhost
+else
+  echo ">> skipping X11 hook (no /etc/X11/Xsession.d — headless host, e.g. PowerEdge)"
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')

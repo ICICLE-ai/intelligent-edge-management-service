@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.errors import ValidationError
 
-VALID_CAMERA_BUSES = frozenset({"csi", "gige-mvs", "usb-v4l2"})
+VALID_CAMERA_BUSES = frozenset({"csi", "gige-mvs", "usb-v4l2", "rtsp"})
 
 _DEFAULTS_BY_BUS = {
     "csi": {"camera_buses": ["csi"], "camera_count": 1, "camera_indices": [0], "host_mounts": {}},
@@ -19,6 +19,12 @@ _DEFAULTS_BY_BUS = {
     },
     "usb-v4l2": {
         "camera_buses": ["usb-v4l2"],
+        "camera_count": 1,
+        "camera_indices": [0],
+        "host_mounts": {},
+    },
+    "rtsp": {
+        "camera_buses": ["rtsp"],
         "camera_count": 1,
         "camera_indices": [0],
         "host_mounts": {},
@@ -109,7 +115,7 @@ def validate_form(
 ) -> dict:
     bus = (camera_bus or "csi").strip().lower()
     if bus not in VALID_CAMERA_BUSES:
-        raise ValidationError("camera_bus must be one of: csi, gige-mvs, usb-v4l2.")
+        raise ValidationError("camera_bus must be one of: csi, gige-mvs, usb-v4l2, rtsp.")
     try:
         count = max(1, min(16, int(camera_count)))
     except (TypeError, ValueError):
@@ -144,6 +150,8 @@ def model_requires_bus(card: dict, bus: str) -> bool:
         return True
     if bus == "usb-v4l2" and "usb-v4l2" in tags:
         return True
+    if bus == "rtsp" and "rtsp" in tags:
+        return True
     return False
 
 
@@ -155,4 +163,6 @@ def device_compatible_with_card(device: dict, card: dict) -> Optional[str]:
         return "App requires GigE (MVS) cameras; update device hardware setup."
     if "csi" in tags and "csi" not in caps["camera_buses"]:
         return "App requires Jetson CSI cameras; update device hardware setup."
+    if "rtsp" in tags and "rtsp" not in caps["camera_buses"]:
+        return "App requires wireless video (no local camera); update device hardware setup."
     return None
