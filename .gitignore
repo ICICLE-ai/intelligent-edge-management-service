@@ -7,6 +7,9 @@
 *.key
 *.p12
 *.pfx
+# Local Tapis pod spec with real secrets. Use pod-edgecontrolplane.json (placeholders) in git.
+edge_fleet_control_plane/deploy/pod-edgecontrolplane-update.json
+edge_fleet_control_plane/deploy/env.production
 
 # --- Local databases ---
 # The control plane writes SQLite here; it holds device, user, and heartbeat data.

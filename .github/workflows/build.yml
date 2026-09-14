@@ -1,0 +1,94 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Matches python:3.12-slim-bookworm in edge_fleet_control_plane/Dockerfile.
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  control-plane:
+    name: Build control plane
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge_fleet_control_plane
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: edge_fleet_control_plane/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Byte-compile Python sources
+        # Parses app, tests, and edge Docker apps without importing CUDA/hardware deps.
+        working-directory: .
+        run: |
+          python -m compileall -q \
+            edge_fleet_control_plane/app \
+            edge_fleet_control_plane/tests \
+            edge_fleet_control_plane/smart_docker_apps
+
+      - name: Run smoke test
+        env:
+          ALLOW_LOCALHOST_INSTALLER: "true"
+          APP_BASE_URL: http://testserver
+          MQTT_ENABLED: "false"
+          LOCAL_DEV_AUTH: "true"
+          LOCAL_DEV_USERNAME: smoke_user
+        run: |
+          mkdir -p data
+          python tests/smoke_test.py
+
+  manifests:
+    name: Check manifests and scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Validate YAML manifests
+        # Workflows, issue templates, component catalog, compose, and MediaMTX
+        # configs are hand-edited and otherwise fail only at deploy time.
+        # safe_load_all handles multi-document manifests.
+        run: |
+          set -euo pipefail
+          git ls-files '*.yml' '*.yaml' -z | xargs -0 python -c '
+          import sys, yaml
+          failed = False
+          for path in sys.argv[1:]:
+              try:
+                  with open(path) as handle:
+                      list(yaml.safe_load_all(handle))
+              except yaml.YAMLError as error:
+                  print(f"Invalid YAML in {path}: {error}")
+                  failed = True
+          sys.exit(1 if failed else 0)
+          '
+
+      - name: Check shell scripts parse
+        run: |
+          set -euo pipefail
+          git ls-files '*.sh' -z | xargs -0 -r -n1 bash -n
