@@ -19,7 +19,7 @@ The project welcomes contributions in increasing order of technical and maintena
 4. Propose a workflow, configuration, annotation, or other non-code artifact.
 5. Prepare a bounded code contribution.
 
-For domain-specific contribution requirements, follow the repository's contribution specification in `docs/`.
+For how a change is verified before merge and before deploy, follow [docs/TESTING.md](docs/TESTING.md). Behavioural changes need a user test document from [docs/user-tests/TEMPLATE.md](docs/user-tests/TEMPLATE.md).
 
 ## Pull requests
 
@@ -27,7 +27,8 @@ A pull request should:
 
 - Reference the related issue or explain the problem being addressed.
 - Be limited to one coherent change.
-- Include or update tests when practical.
+- Include or update tests when practical. Run the Level 0 commands in `docs/TESTING.md` for code changes.
+- Commit a user test document under `docs/user-tests/` for any behavioural change.
 - Update documentation when user-visible behavior, interfaces, configuration, installation, or limitations change.
 - Identify dependencies, data assumptions, security implications, and maintenance implications.
 - Not include secrets, large unreviewed binary assets, private datasets, or unlicensed materials.

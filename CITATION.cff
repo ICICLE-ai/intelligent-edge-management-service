@@ -4,6 +4,8 @@ title: "Intelligent Edge Management Service"
 version: "0.1.0"
 license: "BSD-3-Clause"
 authors:
+  - family-names: "Byrandurga Gopinath"
+    given-names: "Harikesh"
   - family-names: "Subramoni"
     given-names: "Hari"
     email: "subramoni.1@osu.edu"
