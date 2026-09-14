@@ -1,6 +1,6 @@
 {
   "pod_id": "edgecontrolplane",
-  "image": "habg21/edge-control-plane:v5",
+  "image": "habg21/edge-control-plane:v9",
   "template": "",
   "description": "ICICLE Edge Fleet Control Plane",
   "command": null,

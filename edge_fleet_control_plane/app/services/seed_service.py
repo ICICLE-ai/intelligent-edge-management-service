@@ -8,7 +8,7 @@ from typing import Any
 from app.config import CONFIG_DIR
 from app.core.ids import gen_uid
 from app.core.logging import get_logger
-from app.db.session import fetch_one
+from app.db.session import execute, fetch_one
 from app.repositories import generations as gen_repo
 from app.repositories import model_cards as mc_repo
 from app.repositories import users as user_repo
@@ -43,6 +43,7 @@ def _seed_models() -> None:
     records: list[dict[str, Any]] = json.loads(path.read_text())
     for r in records:
         if fetch_one("SELECT 1 FROM model_cards WHERE model_card_uid = ?", (r["model_card_uid"],)):
+            _refresh_seed_artifact(r)
             continue
         log.info("seeding model card %s", r["model_card_uid"])
         artifact = r["artifact"].copy()
@@ -95,4 +96,28 @@ def _seed_models() -> None:
             artifact=artifact,
             spec=spec,
             compatibility=r.get("compatibility") or [],
+        )
+
+
+def _refresh_seed_artifact(r: dict[str, Any]) -> None:
+    """Fill Patra UUID / download URL on already-seeded cards when seed JSON is updated."""
+    artifact = r.get("artifact") or {}
+    patra = r.get("patra_model_card_uuid") or artifact.get("patra_model_card_uuid")
+    download = artifact.get("download_url")
+    if not patra and not download:
+        return
+    uid = r["model_card_uid"]
+    if patra:
+        execute(
+            "UPDATE model_cards SET patra_model_card_uuid = ? WHERE model_card_uid = ?",
+            (patra, uid),
+        )
+        execute(
+            "UPDATE model_artifacts SET patra_model_card_uuid = ? WHERE model_card_uid = ?",
+            (patra, uid),
+        )
+    if download:
+        execute(
+            "UPDATE model_artifacts SET download_url = ? WHERE model_card_uid = ?",
+            (download, uid),
         )

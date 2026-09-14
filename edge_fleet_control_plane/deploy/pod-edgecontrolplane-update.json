@@ -1,5 +1,5 @@
 {
-  "image": "habg21/edge-control-plane:v7",
+  "image": "habg21/edge-control-plane:v9",
   "command": null,
   "arguments": null,
   "environment_variables": {
