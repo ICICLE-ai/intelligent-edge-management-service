@@ -13,6 +13,7 @@ For guidance on what to include in Tutorials, How-To Guides, Explanation, and Re
 ## References
 
 - [ICICLE Edge Fleet Control Plane — System Overview](edge_fleet_control_plane/deploy/SYSTEM_OVERVIEW.md)
+- [Release notes](docs/RELEASES.md)
 - [Deploy on Tapis Pods](edge_fleet_control_plane/deploy/DEPLOY.md)
 - [Tapis OAuth integration guide](edge_fleet_control_plane/deploy/TAPIS_OAUTH_GUIDE.md)
 - [Live streaming architecture](edge_fleet_control_plane/deploy/STREAMING.md)

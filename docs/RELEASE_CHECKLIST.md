@@ -6,6 +6,8 @@ Complete this checklist before creating a public release.
 
 - [ ] Version and release date are set.
 - [ ] Release notes state current capabilities, known limitations, and breaking changes.
+      Update [docs/RELEASES.md](./RELEASES.md) and paste that section into GitHub
+      Releases when tagging.
 - [ ] README installation and reference example were reviewed against the release.
 - [ ] `CITATION.cff` matches the tagged version and release date.
 - [ ] Documentation identifies supported environments and known unsupported settings.
