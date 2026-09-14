@@ -471,6 +471,7 @@ Rules for writing them:
   contain
 - [docs/RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md) — the checklist to complete before a
   public release
+- [docs/RELEASES.md](./RELEASES.md) — dated GitHub Release notes
 - [docs/MAINTAINER_ROLES.md](./MAINTAINER_ROLES.md) — who owns review, release, and
   security response
 - [SECURITY.md](../SECURITY.md) — reporting a vulnerability; contributor security

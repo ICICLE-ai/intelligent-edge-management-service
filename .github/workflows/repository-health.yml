@@ -25,6 +25,7 @@ jobs:
             "docs/RELEASE_CHECKLIST.md"
             "docs/MAINTAINER_ROLES.md"
             "docs/TESTING.md"
+            "docs/RELEASES.md"
             "docs/user-tests/TEMPLATE.md"
           )
           missing=0

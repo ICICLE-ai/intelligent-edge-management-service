@@ -1,5 +1,10 @@
 # Release notes — Intelligent Edge Management Service
 
+User-facing, dated notes for **GitHub Releases** are in [docs/RELEASES.md](docs/RELEASES.md).
+Paste the latest section when you tag a release (title `Release YYYY-MM`).
+
+The section below is the ICICLE catalog snapshot for **0.1.0**.
+
 ## Version 0.1.0
 
 **Component ID:** `IntelligentEdgeManagementService:0.1.0`  
