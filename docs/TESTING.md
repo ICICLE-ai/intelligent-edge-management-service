@@ -203,10 +203,12 @@ Two jobs.
    The version and digest are pinned in the job `env` rather than resolved from the
    releases API, which is unauthenticated and rate limited per runner IP.
 3. Scan for secrets — on a pull request, `gitleaks git . --log-opts "$BASE_SHA..$HEAD_SHA"
-   --redact`, covering only the commits the pull request adds. On any other event,
-   `gitleaks git . --redact` over the whole history. The SHAs are passed through the
-   environment rather than interpolated into the script body, so a workflow input can
-   never become shell syntax.
+   --redact`, covering only the commits the pull request adds. On `push` to `main`,
+   only the new commits (`$BEFORE_SHA..$PUSH_SHA`). On `schedule` and
+   `workflow_dispatch`, `gitleaks git . --redact` over the whole history; those
+   full-history runs use `continue-on-error` because older commits still contain
+   a removed Tapis pod spec and a former `.env`. Rotate those credentials; do not
+   treat a green push scan as proof that history is clean.
 
 **`trufflehog` — "Detect secrets (trufflehog)"**
 
