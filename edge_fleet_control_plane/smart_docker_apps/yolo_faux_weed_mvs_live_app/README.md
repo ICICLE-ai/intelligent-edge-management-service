@@ -274,6 +274,7 @@ https://edgemediahls.pods.icicleai.tapis.io/cam-dev_test-1/index.m3u8
 | `trtexec` fails to parse the ONNX | `opset=11 simplify=True`; if it still fails, TensorRT 7 cannot take this YOLO11 graph — see the fallbacks above |
 | `Dynamic input shape not supported` | Re-export with a fixed `imgsz` and batch 1 |
 | Boxes labelled `id 0` | Set `CLASS_NAMES` |
+| `det 0` and frame looks dark | Auto-exposure locked at a bad value after 1.5 s; use `AUTO_ADJUST_MODE=continuous`, or set exposure in `/opt/MVS/bin/MVS.sh` and run with `AUTO_ADJUST_MODE=off` |
 | Boxes misaligned or absent | Output is not `(1, 4 + nc, anchors)`; re-export without `nms=True` |
 | Plants detected but wrong colour class | Camera white balance differs from training; pin exposure/WB and set `AUTO_ADJUST_MODE=off` |
 | Small plants missed | Engine `imgsz` below 1920, or `DISPLAY_WIDTH` below the engine width; the model has no scale augmentation to compensate |

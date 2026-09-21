@@ -61,10 +61,15 @@ RUN mkdir -p /workspace/models /workspace/app /data/camera_images \
     && chmod 777 /workspace/models
 
 COPY app/ /workspace/app/
+COPY tools/ /workspace/tools/
 COPY run_multicam.py /workspace/run_multicam.py
 
 ENV MODEL_PATH=/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine
-ENV CONFIDENCE=0.25
+ENV CONFIDENCE=0.35
+# Auto exposure/gain/white balance must keep tracking: "once" locks after 1.5s,
+# which latched a near-black frame on the Xavier and suppressed every detection.
+# Colour defines several classes here, so a drifting white balance costs accuracy.
+ENV AUTO_ADJUST_MODE=continuous
 ENV IOU=0.45
 ENV CAMERA_INDICES=0
 ENV STREAM_FPS=5

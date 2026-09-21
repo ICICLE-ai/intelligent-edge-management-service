@@ -39,6 +39,36 @@ def to_blob(canvas):
     return np.ascontiguousarray(np.expand_dims(chw, axis=0), dtype=np.float32)
 
 
+def nms(x1, y1, x2, y2, confidences, iou_threshold, limit):
+    """Greedy NMS in numpy, returning kept indices in descending score order.
+
+    Hand-rolled rather than cv2.dnn.NMSBoxes because the JetPack 4 python3-opencv
+    package is built without the dnn module, so that call raises AttributeError on
+    the target device.
+    """
+    areas = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+    order = np.argsort(confidences)[::-1]
+    # Bound the O(n^2) loop: at 1920 the head emits ~76k anchors, and a low
+    # CONFIDENCE on a busy frame can let thousands through.
+    order = order[: max(limit * 10, 1000)]
+
+    keep = []
+    while order.size > 0 and len(keep) < limit:
+        i = order[0]
+        keep.append(i)
+        if order.size == 1:
+            break
+        rest = order[1:]
+        inter_w = np.maximum(0.0, np.minimum(x2[i], x2[rest]) - np.maximum(x1[i], x1[rest]))
+        inter_h = np.maximum(0.0, np.minimum(y2[i], y2[rest]) - np.maximum(y1[i], y1[rest]))
+        inter = inter_w * inter_h
+        union = areas[i] + areas[rest] - inter
+        iou = np.where(union > 0.0, inter / np.maximum(union, 1e-9), 0.0)
+        order = rest[iou <= iou_threshold]
+
+    return np.asarray(keep, dtype=np.int64)
+
+
 def decode_detections(raw, ratio, pad_x, pad_y, frame_w, frame_h):
     """Decode an ultralytics detect head into frame-space boxes.
 
@@ -78,34 +108,24 @@ def decode_detections(raw, ratio, pad_x, pad_y, frame_w, frame_h):
     x2 = np.clip((boxes[:, 0] + half_w - pad_x) / ratio, 0, frame_w - 1)
     y2 = np.clip((boxes[:, 1] + half_h - pad_y) / ratio, 0, frame_h - 1)
 
-    # cv2.dnn.NMSBoxes is class-agnostic, so shift each class into its own
-    # coordinate band to stop overlapping boxes of different classes suppressing
-    # each other.
+    # NMS is class-agnostic, so shift each class into its own coordinate band to
+    # stop overlapping boxes of different classes suppressing each other.
     band = float(frame_w + 1)
     offsets = class_ids.astype(np.float32) * band
-    nms_boxes = [
-        [
-            int(x1[i] + offsets[i]),
-            int(y1[i]),
-            max(1, int(x2[i] - x1[i])),
-            max(1, int(y2[i] - y1[i])),
-        ]
-        for i in range(confidences.shape[0])
-    ]
-    indices = cv2.dnn.NMSBoxes(
-        nms_boxes,
-        confidences.astype(np.float32).tolist(),
-        config.CONFIDENCE,
+    order = nms(
+        x1 + offsets,
+        y1,
+        x2 + offsets,
+        y2,
+        confidences,
         config.IOU,
+        config.MAX_DETECTIONS,
     )
-    if indices is None or len(indices) == 0:
+    if order.size == 0:
         return []
 
-    # OpenCV 3/4.1 return [[i], [j], …]; 4.5+ return [i, j, …].
-    order = np.asarray(indices).reshape(-1)
-
     detections = []
-    for i in order[: config.MAX_DETECTIONS]:
+    for i in order:
         detections.append(
             (
                 int(x1[i]), int(y1[i]), int(x2[i]), int(y2[i]),
@@ -313,9 +333,14 @@ class TensorRTBackend(object):
                 batch_size=1, bindings=self.bindings, stream_handle=self.stream.handle
             )
 
-    def infer_annotated(self, bgr):
+    def infer_raw(self, bgr):
+        """Run the engine and return its undecoded output plus letterbox geometry.
+
+        Split out from infer_annotated so tools/probe_image.py can look at the raw
+        scores: a silent zero-detection failure looks identical whether the engine
+        is wrong or the scene simply has nothing in it.
+        """
         cuda = self.cuda
-        frame_h, frame_w = bgr.shape[:2]
         _, _, in_h, in_w = self.input_shape
         canvas, ratio, pad_x, pad_y = letterbox(bgr, in_h, in_w)
         blob = to_blob(canvas)
@@ -330,6 +355,11 @@ class TensorRTBackend(object):
             infer_ms = (time.time() - start) * 1000.0
             raw = np.array(self.host_out, copy=True).reshape(self.out_shape)
 
+        return raw, ratio, pad_x, pad_y, infer_ms
+
+    def infer_annotated(self, bgr):
+        frame_h, frame_w = bgr.shape[:2]
+        raw, ratio, pad_x, pad_y, infer_ms = self.infer_raw(bgr)
         detections = decode_detections(raw, ratio, pad_x, pad_y, frame_w, frame_h)
         return draw_detections(bgr, detections), infer_ms, len(detections)
 
