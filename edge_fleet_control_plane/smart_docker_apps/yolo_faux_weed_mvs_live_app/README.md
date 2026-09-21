@@ -39,19 +39,36 @@ happen in `app/yolo_runner.py`.
 3. GigE cameras reachable on the same L2 network.
 4. MediaMTX ingest/HLS pods running (see `deploy/mediamtx/MEDIAMTX_TWO_POD.md`).
 
-## 1. Read the class names off the checkpoint
+## 1. Class names
 
-An engine carries no class names, so they have to be passed in as `CLASS_NAMES`
-in class-id order — the colour classes (red, purple, green artificial plants).
-Either read `yolo_dataset_1000/data.yaml` from the training tree, or ask the
-checkpoint anywhere ultralytics is installed:
+A TensorRT engine carries no class names, so they must be passed in as
+`CLASS_NAMES`, indexed by class id. For this model there are 7:
 
-```bash
-python3 -c "from ultralytics import YOLO; print(YOLO('artificial_plants_1000_native_1920_best.pt').names)"
+| id | name |
+|----|------|
+| 0 | `green_broadleaf` |
+| 1 | `red_swordleaf` |
+| 2 | `red_green_swordleaf` |
+| 3 | `bright_green_grass` |
+| 4 | `white_flower_spike` |
+| 5 | `purple_flower_spike` |
+| 6 | `purple_green_swordleaf` |
+
+```text
+CLASS_NAMES=green_broadleaf,red_swordleaf,red_green_swordleaf,bright_green_grass,white_flower_spike,purple_flower_spike,purple_green_swordleaf
 ```
 
-Order matters, since `CLASS_NAMES` is indexed by class id. Without it, labels
-render as `id 0`, `id 1`, `id 2`.
+These come from the ONNX metadata, which ultralytics embeds on export. To re-read
+them after a retrain:
+
+```bash
+python3 -c "import onnx; print({p.key: p.value for p in onnx.load('faux_weed_1920.onnx').metadata_props}['names'])"
+```
+
+Note how many pairs differ only by colour — `red_swordleaf` vs
+`red_green_swordleaf` vs `purple_green_swordleaf`, and `green_broadleaf` vs
+`bright_green_grass`. That is what makes the white balance note below load-bearing
+rather than theoretical.
 
 ## 2. Export the engine
 
@@ -188,7 +205,7 @@ docker run --rm -it \
   -v /opt/MVS:/opt/MVS:ro \
   -v /opt/models/faux-weed:/workspace/models:ro \
   -e MODEL_PATH=/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine \
-  -e CLASS_NAMES=<from step 1, in class-id order> \
+  -e CLASS_NAMES=green_broadleaf,red_swordleaf,red_green_swordleaf,bright_green_grass,white_flower_spike,purple_flower_spike,purple_green_swordleaf \
   -e CAMERA_INDICES=0 \
   -e DISPLAY_WIDTH=1920 \
   -e DETECT_EVERY_N_FRAMES=3 \
@@ -212,8 +229,10 @@ Two cameras — add one `STREAM_INGEST_URL_<index>` per camera:
 - Replace `dev_test` with the device UID when testing portal paths.
 
 On start-up the container prints the engine's resolved input and output shapes.
-Check the output is `(1, 4 + num_classes, num_anchors)` — anything else means the
-ONNX was exported with NMS fused in, and the decoder will not understand it.
+For this model at 1920 they should read `(1, 3, 1920, 1920)` and
+`(1, 11, 75600)` — 11 being `4 + 7` classes. Anything else, in particular a
+2-dimensional output, means the ONNX was exported with NMS fused in and the
+decoder will not understand it.
 
 ### Verify HLS
 

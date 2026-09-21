@@ -11,6 +11,19 @@
 edge_fleet_control_plane/deploy/pod-edgecontrolplane-update.json
 edge_fleet_control_plane/deploy/env.production
 
+# --- Model weights and build artifacts ---
+# Checkpoints, ONNX graphs, and TensorRT engines are tens to hundreds of MB and
+# are distributed through Patra / Hugging Face, not git. Engines are also tied to
+# the device and TensorRT version that built them, so they are never portable.
+*.pt
+*.pth
+*.onnx
+*.engine
+*.plan
+*.trt
+# Scratch space for local .pt -> ONNX -> .engine conversions.
+engine_generation/
+
 # --- Local databases ---
 # The control plane writes SQLite here; it holds device, user, and heartbeat data.
 data/
