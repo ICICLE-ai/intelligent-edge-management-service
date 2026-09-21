@@ -240,6 +240,7 @@
       "container_path": "/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
       "source_type": "patra",
       "patra_model_card_uuid": "c2e4c207-732d-46ae-8fd9-1d0658ae9d95",
+      "download_url": "https://huggingface.co/habg21/faux_weed_detection/resolve/main/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
       "content_type": "application/octet-stream"
     },
     "container": {
