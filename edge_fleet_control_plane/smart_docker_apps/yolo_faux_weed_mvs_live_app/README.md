@@ -193,6 +193,12 @@ docker build -t habg21/yolo-faux-weed-mvs-live:jp4 .
 docker push habg21/yolo-faux-weed-mvs-live:jp4
 ```
 
+Local desktop preview is a **different tag** so the portal `jp4` image stays headless:
+
+```bash
+docker build -t habg21/yolo-faux-weed-mvs-live:jp4-gui .
+```
+
 ## 4. Run (manual validation)
 
 Single camera:
@@ -220,6 +226,25 @@ Two cameras — add one `STREAM_INGEST_URL_<index>` per camera:
   -e CAMERA_INDICES=0,1 \
   -e STREAM_INGEST_URL_0='rtsps://edgemediaingest.pods.icicleai.tapis.io:443/cam-dev_test-0' \
   -e STREAM_INGEST_URL_1='rtsps://edgemediaingest.pods.icicleai.tapis.io:443/cam-dev_test-1' \
+```
+
+On-device OpenCV window (Jetson desktop session, not SSH without X). `q` or Esc closes:
+
+```bash
+xhost +local:docker
+docker run --rm -it \
+  --runtime nvidia --gpus all --network host --privileged \
+  -e DISPLAY=$DISPLAY \
+  -e SHOW_WINDOW=true \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v /opt/MVS:/opt/MVS:ro \
+  -v /opt/models/faux-weed:/workspace/models:ro \
+  -e MODEL_PATH=/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine \
+  -e CLASS_NAMES=green_broadleaf,red_swordleaf,red_green_swordleaf,bright_green_grass,white_flower_spike,purple_flower_spike,purple_green_swordleaf \
+  -e CAMERA_INDICES=0 \
+  -e AUTO_ADJUST_MODE=continuous \
+  -e CONFIDENCE=0.35 \
+  habg21/yolo-faux-weed-mvs-live:jp4-gui
 ```
 
 **Notes**

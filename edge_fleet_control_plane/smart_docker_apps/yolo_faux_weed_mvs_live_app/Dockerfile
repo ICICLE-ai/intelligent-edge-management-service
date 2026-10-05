@@ -39,10 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-rtsp \
     libx264-dev \
-    python3-gi \
-    gir1.2-gstreamer-1.0 \
-    gir1.2-gst-plugins-base-1.0 \
-    ffmpeg \
+        python3-gi \
+        gir1.2-gstreamer-1.0 \
+        gir1.2-gst-plugins-base-1.0 \
+        libgtk2.0-0 \
+        libcanberra-gtk-module \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --upgrade "pip<22" "setuptools<60" wheel

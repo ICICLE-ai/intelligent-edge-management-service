@@ -5,14 +5,21 @@ import signal
 import sys
 import threading
 
-# Headless container: avoid OpenCV/GUI trying X11 (XOpenDisplay failed).
-os.environ.pop("DISPLAY", None)
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Headless unless SHOW_WINDOW=true (local Jetson desktop preview).
+_show_window = (os.environ.get("SHOW_WINDOW") or "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+if _show_window:
+    os.environ.pop("QT_QPA_PLATFORM", None)
+else:
+    os.environ.pop("DISPLAY", None)
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 from . import config
 from . import hik_camera
+from .display_worker import display_loop
 from .frame_store import FrameStore
 from .inference_worker import inference_loop
 from .stream_worker import stream_loop
@@ -59,6 +66,7 @@ def main():
     print("STREAM_FPS:           %d" % config.STREAM_FPS)
     print("STREAM_WIDTH/HEIGHT:  %dx%d" % (config.STREAM_WIDTH, config.STREAM_HEIGHT))
     print("DETECT_EVERY_N:       %d" % config.DETECT_EVERY_N_FRAMES)
+    print("SHOW_WINDOW:          %s" % config.SHOW_WINDOW)
     print("STREAM_INGEST_URLS:   %d configured" % len(config.STREAM_INGEST_URLS))
 
     if not os.path.exists(config.MODEL_PATH):
@@ -118,6 +126,16 @@ def main():
         infer_thread.daemon = True
         infer_thread.start()
         threads.append(infer_thread)
+
+        if config.SHOW_WINDOW:
+            display_thread = threading.Thread(
+                target=display_loop,
+                args=(frame_store, stop_event),
+                name="display-worker",
+            )
+            display_thread.daemon = True
+            display_thread.start()
+            threads.append(display_thread)
 
         for cam_idx, cam in cameras:
             grab_thread = threading.Thread(

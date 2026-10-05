@@ -15,8 +15,19 @@ import numpy as np
 from . import config
 
 ENGINE_SUFFIXES = (".engine", ".plan", ".trt")
-BOX_COLOR = (0, 255, 0)
-LABEL_TEXT_COLOR = (0, 0, 0)
+
+# BGR, one entry per class in CLASS_NAMES order. Neighbouring colour-classes
+# (red vs red-green, purple vs purple-green) get hues that stay distinct after
+# the 1920 -> 960 stream downscale.
+CLASS_COLORS = (
+    (36, 220, 36),     # green_broadleaf
+    (50, 50, 255),     # red_swordleaf
+    (0, 140, 255),     # red_green_swordleaf
+    (0, 255, 210),     # bright_green_grass
+    (240, 240, 240),   # white_flower_spike
+    (220, 60, 200),    # purple_flower_spike
+    (160, 255, 40),    # purple_green_swordleaf
+)
 
 
 def letterbox(bgr, target_h, target_w, pad_value=114):
@@ -135,21 +146,53 @@ def decode_detections(raw, ratio, pad_x, pad_y, frame_w, frame_h):
     return detections
 
 
+def color_for_class(class_id):
+    return CLASS_COLORS[int(class_id) % len(CLASS_COLORS)]
+
+
+def label_text_color(bgr_color):
+    """Black on bright fills, white on dark — keeps the class name readable."""
+    b, g, r = bgr_color
+    luminance = 0.114 * b + 0.587 * g + 0.299 * r
+    return (0, 0, 0) if luminance >= 140 else (255, 255, 255)
+
+
+def draw_metrics(frame_w):
+    """Scale glyphs for the streamed frame, not the infer frame.
+
+    Boxes are drawn on DISPLAY_WIDTH (1920) and then downscaled to STREAM_WIDTH
+    (960). A 0.5 OpenCV scale that looks fine at 1920 becomes unreadably small
+    on the HLS tile, so we size as if the viewer is looking at ~960 px.
+    """
+    font_scale = max(1.1, frame_w / 960.0 * 0.85)
+    text_thickness = max(2, int(round(frame_w / 640.0)))
+    box_thickness = max(3, int(round(frame_w / 480.0)))
+    return font_scale, text_thickness, box_thickness
+
+
 def draw_detections(bgr, detections):
     out = bgr.copy()
+    font_scale, text_thickness, box_thickness = draw_metrics(out.shape[1])
     for x1, y1, x2, y2, confidence, class_id in detections:
-        cv2.rectangle(out, (x1, y1), (x2, y2), BOX_COLOR, 2)
+        color = color_for_class(class_id)
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, box_thickness)
         label = "%s %.2f" % (config.class_name(class_id), confidence)
         (text_w, text_h), baseline = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness
         )
-        top = max(y1, text_h + baseline)
+        pad = max(4, int(round(font_scale * 4)))
+        top = max(y1, text_h + baseline + pad)
         cv2.rectangle(
-            out, (x1, top - text_h - baseline), (x1 + text_w, top), BOX_COLOR, -1
+            out,
+            (x1, top - text_h - baseline - pad),
+            (x1 + text_w + pad, top),
+            color,
+            -1,
         )
         cv2.putText(
-            out, label, (x1, top - baseline),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, LABEL_TEXT_COLOR, 1,
+            out, label, (x1 + pad // 2, top - baseline - pad // 2),
+            cv2.FONT_HERSHEY_SIMPLEX, font_scale, label_text_color(color),
+            text_thickness,
         )
     return out
 

@@ -70,15 +70,17 @@ def inference_loop(frame_store, runner, stop_event):
             status = frame_store.get_status(camera_id)
             fps = float(status.get("fps", 0.0))
             overlay = annotated.copy()
+            font_scale = max(1.1, overlay.shape[1] / 960.0 * 0.85)
+            thickness = max(2, int(round(overlay.shape[1] / 640.0)))
             cv2.putText(
                 overlay,
                 "Cam %d | %.1f fps | infer %.0f ms | det %d"
                 % (camera_id, fps, infer_ms, detections),
-                (20, 40),
+                (20, int(48 * font_scale)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
+                font_scale,
                 (0, 255, 0),
-                2,
+                thickness,
             )
 
             frame_store.update_processed(

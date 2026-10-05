@@ -83,6 +83,9 @@ AUTO_ADJUST_MODE = os.environ.get("AUTO_ADJUST_MODE", "once")
 AUTO_ADJUST_SETTLE_SECONDS = float(os.environ.get("AUTO_ADJUST_SETTLE_SECONDS", "1.5"))
 LOCK_AUTO_ADJUST_AFTER_ONCE = _env_bool("LOCK_AUTO_ADJUST_AFTER_ONCE", True)
 
+# Local X11 preview (cv2.imshow). Off by default so the portal image stays headless.
+SHOW_WINDOW = _env_bool("SHOW_WINDOW", False)
+
 ENABLE_IMAGE_SAVE = _env_bool("ENABLE_IMAGE_SAVE", False)
 IMAGE_SAVE_DIR = os.environ.get("IMAGE_SAVE_DIR", "/data/camera_images")
 SAVE_EVERY_N_FRAMES = max(1, int(os.environ.get("SAVE_EVERY_N_FRAMES", "30")))
