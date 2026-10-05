@@ -218,5 +218,63 @@
     "compatibility": [
       {"generation_uid": "dell-poweredge-gpu-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "linux/amd64 CUDA 12.4 image. NVIDIA Container Toolkit required. STREAM_INGEST_URL is injected on deploy."}
     ]
+  },
+  {
+    "model_card_uid": "mc_seed_yolo_faux_weed_mvs_live",
+    "app_id": "app_seed_yolo_faux_weed_mvs",
+    "visibility": "public",
+    "slug": "yolo-faux-weed-mvs-live",
+    "display_name": "Faux Weed YOLO11 MVS Multi-Camera (Live Stream)",
+    "version": "1.0.0",
+    "task_type": "object detection",
+    "framework": "tensorrt",
+    "description": "YOLO11s detection of faux (artificial) weeds on Hikrobot GigE cameras via the MVS SDK, with per-camera RTSPS push. Runs a TensorRT engine through pycuda because JetPack 4 is Python 3.6 and cannot load a YOLO .pt. Portal injects STREAM_INGEST_URL_0..N and CAMERA_INDICES on deploy. Seven colour-sensitive classes: set CLASS_NAMES and keep camera white balance stable.",
+    "license": "Apache-2.0",
+    "homepage_url": "https://huggingface.co/habg21/faux_weed_detection",
+    "tags": ["agriculture", "object detection", "yolo", "tensorrt", "live-stream", "gige-mvs", "multi-camera"],
+    "status": "PUBLISHED",
+    "patra_model_card_uuid": "c2e4c207-732d-46ae-8fd9-1d0658ae9d95",
+    "raw_docker_command": "docker run --rm --runtime nvidia --gpus all --network host --privileged -v /opt/MVS:/opt/MVS:ro -v /opt/models/faux-weed:/workspace/models:ro -e MODEL_PATH=/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine -e CLASS_NAMES=green_broadleaf,red_swordleaf,red_green_swordleaf,bright_green_grass,white_flower_spike,purple_flower_spike,purple_green_swordleaf -e CAMERA_INDICES=0 -e CONFIDENCE=0.35 -e AUTO_ADJUST_MODE=continuous -e DISPLAY_WIDTH=1920 -e DETECT_EVERY_N_FRAMES=3 -e STREAM_FPS=5 -e STREAM_WIDTH=960 -e STREAM_HEIGHT=540 habg21/yolo-faux-weed-mvs-live:jp4\n\n# Fleet deploy: portal injects per-camera ingest URLs from device hardware (camera count + MVS indices).\n# Manual test with 2 GigE cameras \u2014 replace <device_uid> and ingest host:\ndocker run --rm --runtime nvidia --gpus all --network host --privileged -v /opt/MVS:/opt/MVS:ro -v /opt/models/faux-weed:/workspace/models:ro -e MODEL_PATH=/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine -e CAMERA_INDICES=0,1 -e STREAM_INGEST_URL_0=rtsps://<ingest-host>/cam-<device_uid>-0 -e STREAM_INGEST_URL_1=rtsps://<ingest-host>/cam-<device_uid>-1 -e CONFIDENCE=0.35 -e AUTO_ADJUST_MODE=continuous -e DISPLAY_WIDTH=1920 -e DETECT_EVERY_N_FRAMES=6 -e STREAM_FPS=5 habg21/yolo-faux-weed-mvs-live:jp4",
+    "artifact": {
+      "filename": "faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
+      "container_path": "/workspace/models/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
+      "source_type": "patra",
+      "patra_model_card_uuid": "c2e4c207-732d-46ae-8fd9-1d0658ae9d95",
+      "download_url": "https://huggingface.co/habg21/faux_weed_detection/resolve/main/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/yolo-faux-weed-mvs-live",
+      "image_tag": "jp4",
+      "container_name": "yolo_faux_weed_mvs_live",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": true,
+      "model_env_var": "MODEL_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "privileged": true,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "CLASS_NAMES": "green_broadleaf,red_swordleaf,red_green_swordleaf,bright_green_grass,white_flower_spike,purple_flower_spike,purple_green_swordleaf",
+      "CONFIDENCE": "0.35",
+      "IOU": "0.45",
+      "DETECT_EVERY_N_FRAMES": "3",
+      "STREAM_FPS": "5",
+      "STREAM_WIDTH": "960",
+      "STREAM_HEIGHT": "540",
+      "DISPLAY_WIDTH": "1920",
+      "AUTO_ADJUST_MODE": "continuous",
+      "QT_QPA_PLATFORM": "offscreen"
+      },
+      "mounts": [
+        {"style": "volume", "type": "bind", "source": "/opt/MVS", "target": "/opt/MVS", "mode": "ro"},
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model", "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "jetson-agx-xavier-jp4-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "Engine must be built on this JP4 Xavier (TRT 7, opset 11). MVS SDK required on host at /opt/MVS. ~100 ms/frame at 1920 on Volta, so raise DETECT_EVERY_N_FRAMES beyond 2 cameras."}
+    ]
   }
 ]

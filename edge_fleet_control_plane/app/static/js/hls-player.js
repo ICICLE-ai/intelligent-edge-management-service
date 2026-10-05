@@ -147,13 +147,13 @@
     if (isRunning) {
       tile.classList.add('cctv-tile--live');
       tile.dataset.streamActive = 'true';
-      if (placeholder) placeholder.style.display = 'none';
-      if (video) video.style.display = 'block';
+      if (placeholder) placeholder.hidden = true;
+      if (video) video.hidden = false;
     } else {
       tile.classList.remove('cctv-tile--live');
       tile.dataset.streamActive = 'false';
-      if (placeholder) placeholder.style.display = '';
-      if (video) video.style.display = 'none';
+      if (placeholder) placeholder.hidden = false;
+      if (video) video.hidden = true;
     }
   }
 
@@ -201,6 +201,7 @@
         if (player) {
           tile.dataset.hlsAttached = '1';
           tile._hlsPlayer = player;
+          bindPlayerFullscreen(video, tile.querySelector('[data-inference-viewport]'));
         }
       }
     } else {
@@ -226,6 +227,90 @@
     });
   }
 
+  function inIframe() {
+    try {
+      return window.self !== window.top;
+    } catch (err) {
+      return true;
+    }
+  }
+
+  function nativeFullscreenAvailable() {
+    return !inIframe() && !!document.fullscreenEnabled;
+  }
+
+  function requestNativeFullscreen(video) {
+    if (!video) return Promise.reject(new Error('no video'));
+    if (video.requestFullscreen) return video.requestFullscreen();
+    if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      return Promise.resolve();
+    }
+    return Promise.reject(new Error('fullscreen unsupported'));
+  }
+
+  function enterTheater(viewport) {
+    if (!viewport) return;
+    document.querySelectorAll('.cctv-tile__viewport.is-theater').forEach(function (node) {
+      node.classList.remove('is-theater');
+      var closeBtn = node.querySelector('[data-close-stream]');
+      if (closeBtn) closeBtn.hidden = true;
+    });
+    viewport.classList.add('is-theater');
+    var close = viewport.querySelector('[data-close-stream]');
+    if (close) close.hidden = false;
+    document.body.classList.add('has-theater-stream');
+  }
+
+  function exitTheater(viewport) {
+    var nodes = viewport
+      ? [viewport]
+      : Array.prototype.slice.call(document.querySelectorAll('.cctv-tile__viewport.is-theater'));
+    nodes.forEach(function (node) {
+      node.classList.remove('is-theater');
+      var closeBtn = node.querySelector('[data-close-stream]');
+      if (closeBtn) closeBtn.hidden = true;
+    });
+    if (!document.querySelector('.cctv-tile__viewport.is-theater')) {
+      document.body.classList.remove('has-theater-stream');
+    }
+  }
+
+  function bindPlayerFullscreen(video, viewport) {
+    if (!video || !viewport || video.dataset.fsBound === '1') return;
+    video.dataset.fsBound = '1';
+
+    video.addEventListener('dblclick', function (evt) {
+      evt.preventDefault();
+      if (viewport.classList.contains('is-theater')) {
+        exitTheater(viewport);
+        return;
+      }
+      if (document.fullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        return;
+      }
+      if (nativeFullscreenAvailable()) {
+        requestNativeFullscreen(video).catch(function () {
+          enterTheater(viewport);
+        });
+        return;
+      }
+      enterTheater(viewport);
+    });
+
+    var close = viewport.querySelector('[data-close-stream]');
+    if (close) {
+      close.addEventListener('click', function () {
+        exitTheater(viewport);
+      });
+    }
+  }
+
+  document.addEventListener('keydown', function (evt) {
+    if (evt.key === 'Escape') exitTheater();
+  });
+
   function bootstrapInference(streamRoot, options) {
     if (!streamRoot) return;
     var tiles = streamRoot.querySelectorAll('.cctv-tile');
@@ -242,6 +327,7 @@
       if (player) {
         tile.dataset.hlsAttached = '1';
         tile._hlsPlayer = player;
+        bindPlayerFullscreen(video, tile.querySelector('[data-inference-viewport]'));
       }
     }
   }
