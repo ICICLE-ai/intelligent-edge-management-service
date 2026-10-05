@@ -861,6 +861,34 @@ body.has-live-poll .live-indicator {
   background: #0b1220;
   overflow: hidden;
 }
+.cctv-tile__viewport.is-theater {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  aspect-ratio: auto;
+  background: #000;
+}
+.cctv-tile__close {
+  appearance: none;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.75);
+  cursor: pointer;
+}
+.cctv-tile__viewport.is-theater .cctv-tile__close {
+  display: block;
+}
+body.has-theater-stream {
+  overflow: hidden;
+}
 .cctv-tile__placeholder {
   position: absolute;
   inset: 0;
@@ -874,14 +902,11 @@ body.has-live-poll .live-indicator {
 }
 .cctv-tile__viewport > video,
 .cctv-tile__video video {
-  position: absolute;
-  inset: 0;
+  display: none;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #000;
-  z-index: 2;
-  display: none;
 }
 .cctv-tile--live .cctv-tile__placeholder {
   display: none !important;
