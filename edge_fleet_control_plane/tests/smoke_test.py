@@ -129,8 +129,14 @@ r = client.post("/api/agent/heartbeat", json={
     "cpu_percent": 17.5,
     "memory_used_mb": 2048,
     "active_containers": [],
+    "platform": {"machine": "aarch64", "gpu_compute_capability": "8.7",
+                 "l4t_version": "35.4.1", "tensorrt_version": "8.5.2.2",
+                 "memory_mb": 7620, "disk_free_gb": 40.0, "nvidia_runtime": True},
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
+reported = fetch_one("SELECT platform_json, platform_reported_at FROM devices WHERE device_uid=?",
+                     (d["device_uid"],))
+assert reported["platform_reported_at"] and json.loads(reported["platform_json"])["l4t_version"] == "35.4.1"
 
 # --------------------------------------------------------------------------- #
 # Publish a fresh app via the web form

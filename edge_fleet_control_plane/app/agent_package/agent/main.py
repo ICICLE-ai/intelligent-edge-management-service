@@ -23,7 +23,9 @@ Targets Python 3.6+ so one bundle works on JetPack 4 (Xavier) and JetPack 6 (Ori
 
 import json
 import os
+import platform
 import pwd
+import re
 import shutil
 import socket
 import subprocess
@@ -41,7 +43,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.1.0"
+AGENT_VERSION = "edge-agent-v2.2.0"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -249,6 +251,100 @@ def load_api_key() -> Optional[str]:
 # Heartbeat
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Platform facts used by the control plane's deploy-time compatibility check
+# ---------------------------------------------------------------------------
+
+# Jetson module name (from the device tree) -> CUDA compute capability.
+_JETSON_COMPUTE_CAPABILITY = (
+    ("orin", "8.7"),
+    ("xavier", "7.2"),
+    ("tx2", "6.2"),
+    ("nano", "5.3"),
+    ("tx1", "5.3"),
+)
+
+_static_platform: Optional[Dict[str, Any]] = None
+
+
+def _read_text(path: str) -> Optional[str]:
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", errors="replace").replace("\x00", "").strip()
+    except OSError:
+        return None
+
+
+def _command_output(cmd: List[str]) -> Optional[str]:
+    try:
+        result = _subprocess_run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _leading_version(text: Optional[str]) -> Optional[str]:
+    match = re.match(r"\s*(\d+(?:\.\d+)*)", text or "")
+    return match.group(1) if match else None
+
+
+def _detect_l4t_version() -> Optional[str]:
+    match = re.search(r"R(\d+)\b.*?REVISION:\s*([\d.]+)", _read_text("/etc/nv_tegra_release") or "")
+    return "%s.%s" % (match.group(1), match.group(2)) if match else None
+
+
+def _detect_tensorrt_version() -> Optional[str]:
+    for package in ("tensorrt", "libnvinfer10", "libnvinfer8", "libnvinfer7"):
+        version = _leading_version(_command_output(["dpkg-query", "-W", "-f=${Version}", package]))
+        if version:
+            return version
+    return None
+
+
+def _detect_compute_capability(jetson_model: Optional[str]) -> Optional[str]:
+    if jetson_model:
+        lowered = jetson_model.lower()
+        for needle, capability in _JETSON_COMPUTE_CAPABILITY:
+            if needle in lowered:
+                return capability
+    out = _command_output(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"])
+    return _leading_version(out.splitlines()[0]) if out else None
+
+
+def _detect_memory_mb() -> Optional[int]:
+    match = re.search(r"MemTotal:\s*(\d+)\s*kB", _read_text("/proc/meminfo") or "")
+    return int(match.group(1)) // 1024 if match else None
+
+
+def _detect_nvidia_runtime() -> Optional[bool]:
+    out = _command_output(["docker", "info", "--format", "{{json .Runtimes}}"])
+    return None if out is None else "nvidia" in out
+
+
+def detect_platform() -> Dict[str, Any]:
+    global _static_platform
+    if _static_platform is None:
+        model = _read_text("/proc/device-tree/model")
+        _static_platform = {
+            "machine": platform.machine(),
+            "jetson_model": model,
+            "gpu_compute_capability": _detect_compute_capability(model),
+            "l4t_version": _detect_l4t_version(),
+            "tensorrt_version": _detect_tensorrt_version(),
+            "memory_mb": _detect_memory_mb(),
+        }
+    facts = dict(_static_platform)
+    facts["nvidia_runtime"] = _detect_nvidia_runtime()
+    disk_root = "/var/lib/docker" if os.path.isdir("/var/lib/docker") else str(BASE_DIR)
+    try:
+        facts["disk_free_gb"] = round(shutil.disk_usage(disk_root).free / 1e9, 1)
+    except OSError:
+        facts["disk_free_gb"] = None
+    return facts
+
+
 def heartbeat_loop(cfg: Dict[str, Any]) -> None:
     interval = int(cfg.get("heartbeat", {}).get("interval_seconds", 30))
     url = cfg["portal"]["base_url"].rstrip("/") + "/api/agent/heartbeat"
@@ -263,6 +359,7 @@ def heartbeat_loop(cfg: Dict[str, Any]) -> None:
                 "agent_version": AGENT_VERSION,
                 "active_containers": list_active_containers(),
                 "docker_running": docker_running(),
+                "platform": detect_platform(),
                 "timestamp": time.time(),
             }
             post_json(url, payload, api_key=api_key)

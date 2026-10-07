@@ -21,7 +21,11 @@
       "source_type": "patra",
       "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
       "size_bytes": 99712684,
-      "content_type": "application/octet-stream"
+      "content_type": "application/octet-stream",
+      "engine_compute_capability": "8.7",
+      "engine_tensorrt_version": "8.5",
+      "engine_l4t_version": "35.4",
+      "engine_precision": "fp16"
     },
     "container": {
       "image_repository": "habg21/unet-trt-infer",
@@ -75,7 +79,11 @@
       "source_type": "patra",
       "patra_model_card_uuid": "56a980ad-ca95-430f-817a-09d93b90d7aa",
       "size_bytes": 99712684,
-      "content_type": "application/octet-stream"
+      "content_type": "application/octet-stream",
+      "engine_compute_capability": "8.7",
+      "engine_tensorrt_version": "8.5",
+      "engine_l4t_version": "35.4",
+      "engine_precision": "fp16"
     },
     "container": {
       "image_repository": "habg21/unet-trt-infer-live",
@@ -131,7 +139,10 @@
       "container_path": "/workspace/models/unetpp_1x3x512x768_agx_xavier_jp4.engine",
       "source_type": "patra",
       "patra_model_card_uuid": "2a25c561-9cbd-46f8-bc92-271d29c14862",
-      "content_type": "application/octet-stream"
+      "content_type": "application/octet-stream",
+      "engine_compute_capability": "7.2",
+      "engine_tensorrt_version": "7",
+      "engine_l4t_version": "32"
     },
     "container": {
       "image_repository": "habg21/unet-mvs-unetpp-live",
@@ -241,7 +252,11 @@
       "source_type": "patra",
       "patra_model_card_uuid": "c2e4c207-732d-46ae-8fd9-1d0658ae9d95",
       "download_url": "https://huggingface.co/habg21/faux_weed_detection/resolve/main/faux_weed_1x3x1920x1920_agx_xavier_jp4.engine",
-      "content_type": "application/octet-stream"
+      "content_type": "application/octet-stream",
+      "engine_compute_capability": "7.2",
+      "engine_tensorrt_version": "7",
+      "engine_l4t_version": "32",
+      "engine_precision": "fp16"
     },
     "container": {
       "image_repository": "habg21/yolo-faux-weed-mvs-live",

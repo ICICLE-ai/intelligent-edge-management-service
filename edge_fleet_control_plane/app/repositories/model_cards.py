@@ -9,6 +9,13 @@ from app.core.ids import gen_uid
 from app.core.time import now_iso
 from app.db.session import connection, execute, fetch_all, fetch_one
 
+ENGINE_FIELDS = (
+    "engine_compute_capability",
+    "engine_tensorrt_version",
+    "engine_l4t_version",
+    "engine_precision",
+)
+
 
 # ---------------------------------------------------------------------------
 # Card-level
@@ -387,8 +394,9 @@ def _insert_artifact(con, model_card_uid: str, artifact: dict, ts: str) -> None:
         INSERT INTO model_artifacts
             (artifact_uid, model_card_uid, filename, container_path, size_bytes, sha256,
              source_type, patra_model_card_uuid, download_url, content_type, notes,
-             created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             engine_compute_capability, engine_tensorrt_version, engine_l4t_version,
+             engine_precision, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             artifact["artifact_uid"],
@@ -402,6 +410,7 @@ def _insert_artifact(con, model_card_uid: str, artifact: dict, ts: str) -> None:
             artifact.get("download_url"),
             artifact.get("content_type"),
             artifact.get("notes"),
+            *(artifact.get(f) for f in ENGINE_FIELDS),
             ts,
             ts,
         ),
@@ -420,7 +429,9 @@ def _update_artifact(con, model_card_uid: str, artifact: dict, ts: str) -> None:
             UPDATE model_artifacts
                SET filename = ?, container_path = ?, size_bytes = ?, sha256 = ?,
                    source_type = ?, patra_model_card_uuid = ?, download_url = ?,
-                   content_type = ?, notes = ?, updated_at = ?
+                   content_type = ?, notes = ?,
+                   engine_compute_capability = ?, engine_tensorrt_version = ?,
+                   engine_l4t_version = ?, engine_precision = ?, updated_at = ?
              WHERE artifact_uid = ?
             """,
             (
@@ -433,6 +444,7 @@ def _update_artifact(con, model_card_uid: str, artifact: dict, ts: str) -> None:
                 artifact.get("download_url"),
                 artifact.get("content_type"),
                 artifact.get("notes"),
+                *(artifact.get(f) for f in ENGINE_FIELDS),
                 ts,
                 existing["artifact_uid"],
             ),

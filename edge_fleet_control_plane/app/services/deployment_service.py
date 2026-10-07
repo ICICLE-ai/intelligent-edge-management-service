@@ -30,7 +30,7 @@ from app.repositories import devices as devices_repo
 from app.repositories import groups as groups_repo
 from app.repositories import model_cards as mc_repo
 from app.repositories import mqtt_audit as audit_repo
-from app.services import device_capabilities, event_service, mqtt_service
+from app.services import compatibility_service, device_capabilities, event_service, mqtt_service
 
 log = get_logger("deployment")
 
@@ -504,6 +504,7 @@ def redispatch(*, owner: str, deployment_uid: str) -> dict:
 
     request_id = gen_request_id()
     target_devices, _ = _resolve_target(owner, dep["target_type"], dep["target_uid"])
+    _assert_compatibility(card, target_devices)
     status, err, topic = _dispatch_deploy(
         owner=owner,
         deployment_uid=deployment_uid,
@@ -893,22 +894,17 @@ def _resolve_target(owner: str, target_type: str, target_uid: str) -> tuple[List
 
 
 def _assert_compatibility(card: dict, devices: List[dict]) -> None:
-    allowed = {c["generation_uid"] for c in card.get("compatibility", [])}
-    if allowed:
-        incompatible = [d for d in devices if d["generation_uid"] not in allowed]
-        if incompatible:
-            names = ", ".join(d["device_name"] for d in incompatible[:5])
-            raise ValidationError(
-                f"Model '{card['display_name']}' is not compatible with: {names}. "
-                "Update model compatibility on the model card, or pick a different target."
-            )
-    cap_errors = []
+    problems = []
     for d in devices:
-        err = device_capabilities.device_compatible_with_card(d, card)
-        if err:
-            cap_errors.append("%s: %s" % (d["device_name"], err))
-    if cap_errors:
-        raise ValidationError("; ".join(cap_errors))
+        reasons = compatibility_service.check(card, d)
+        if reasons:
+            problems.append("%s: %s" % (d["device_name"], "; ".join(reasons)))
+    if problems:
+        raise ValidationError(
+            f"'{card['display_name']}' cannot be deployed to "
+            + " | ".join(problems[:5])
+            + (" | …" if len(problems) > 5 else "")
+        )
 
 
 def _docker_image_ref(spec: dict) -> str:

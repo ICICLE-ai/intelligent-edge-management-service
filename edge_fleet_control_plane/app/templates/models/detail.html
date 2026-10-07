@@ -98,6 +98,10 @@
         {% if artifact.download_url %}<dt>Download URL</dt><dd class="mono small">{{ artifact.download_url }}</dd>{% endif %}
         {% if artifact.size_bytes %}<dt>Size</dt><dd>{{ artifact.size_bytes }} bytes</dd>{% endif %}
         {% if artifact.sha256 %}<dt>SHA-256</dt><dd class="mono small">{{ artifact.sha256 }}</dd>{% endif %}
+        {% if artifact.engine_compute_capability %}<dt>Engine GPU</dt><dd class="mono">sm {{ artifact.engine_compute_capability }}</dd>{% endif %}
+        {% if artifact.engine_tensorrt_version %}<dt>Engine TensorRT</dt><dd class="mono">{{ artifact.engine_tensorrt_version }}</dd>{% endif %}
+        {% if artifact.engine_l4t_version %}<dt>Engine L4T</dt><dd class="mono">{{ artifact.engine_l4t_version }}</dd>{% endif %}
+        {% if artifact.engine_precision %}<dt>Precision</dt><dd class="mono">{{ artifact.engine_precision }}</dd>{% endif %}
         {% if artifact.notes %}<dt>Notes</dt><dd>{{ artifact.notes }}</dd>{% endif %}
       </dl>
     </div>

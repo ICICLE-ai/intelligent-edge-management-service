@@ -69,6 +69,8 @@ def record_heartbeat(payload: Dict[str, Any]) -> Dict[str, Any]:
         agent_version=payload.get("agent_version"),
         heartbeat_at=received,
     )
+    if isinstance(payload.get("platform"), dict):
+        devices_repo.update_platform(device_uid, payload["platform"], received)
     return {"ok": True, "received_at": received}
 
 
