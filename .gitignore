@@ -24,6 +24,10 @@ edge_fleet_control_plane/deploy/env.production
 # Scratch space for local .pt -> ONNX -> .engine conversions.
 engine_generation/
 
+# --- Evaluation exports ---
+# Measured timings from a live database; they contain device and deployment IDs.
+edge_fleet_control_plane/eval/results/
+
 # --- Local databases ---
 # The control plane writes SQLite here; it holds device, user, and heartbeat data.
 data/

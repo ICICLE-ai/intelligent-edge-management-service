@@ -294,6 +294,21 @@ assert r.status_code in (303, 307), r.text
 # --------------------------------------------------------------------------- #
 # Agent ACK back -> device-level row updated, deployment marked RUNNING       #
 # --------------------------------------------------------------------------- #
+deploy_timings = {"agent_version": "edge-agent-v2.1.0", "queue_s": 0.001,
+                  "artifact_cached": False, "resolve_s": 0.2}
+for phase, more in (("DOWNLOADING", {}), ("PULLING", {"download_s": 4.0}),
+                    ("STARTING", {"pull_s": 30.0, "image_cached": False})):
+    deploy_timings.update(more)
+    r = client.post("/api/agent/ack", json={
+        "device_id": d["device_uid"],
+        "request_id": cmd["request_id"],
+        "deployment_uid": dep["deployment_uid"],
+        "operation": "deploy_model",
+        "status": phase,
+        "timings": deploy_timings,
+    }, headers=agent_headers)
+    assert r.status_code == 200, r.text
+deploy_timings.update({"run_s": 1.5, "total_s": 35.8})
 r = client.post("/api/agent/ack", json={
     "device_id": d["device_uid"],
     "request_id": cmd["request_id"],
@@ -302,6 +317,7 @@ r = client.post("/api/agent/ack", json={
     "status": "RUNNING",
     "container_id": "abcd1234",
     "container_name": payload["container"]["container_name"],
+    "timings": deploy_timings,
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
@@ -347,10 +363,27 @@ r = client.post("/api/agent/ack", json={
     "status": "RUNNING",
     "container_id": "abcd1234",
     "container_name": payload["container"]["container_name"],
+    "timings": {"queue_s": 0.001, "artifact_cached": True, "pull_s": 0.05,
+                "image_cached": True, "run_s": 1.2, "total_s": 1.3},
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 dep_running = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_running and dep_running["status"] == "RUNNING", dict(dep_running or {})
+
+# Evaluation export: per-phase timings from command rows + ack events
+sys.path.insert(0, str(ROOT / "eval"))
+from export_deployment_timings import build_rows  # noqa: E402
+
+timing_rows = {(r["request_id"], r["operation"]): r for r in build_rows()
+               if r["deployment_uid"] == dep["deployment_uid"]}
+cold = timing_rows[(cmd["request_id"], "deploy_model")]
+assert cold["final_status"] == "RUNNING", cold
+assert cold["ack_downloading_at"] and cold["ack_pulling_at"] and cold["ack_starting_at"], cold
+assert cold["agent_download_s"] == 4.0 and cold["agent_image_cached"] is False, cold
+assert cold["end_to_end_s"] is not None and cold["generation_uid"], cold
+warm = timing_rows[(restart_cmd["request_id"], "restart_deployment")]
+assert warm["agent_artifact_cached"] is True and warm["agent_total_s"] == 1.3, warm
+assert warm["ack_downloading_at"] is None, warm
 
 # Purge — full cleanup
 r = client.post(f"/deployments/{dep['deployment_uid']}/stop", data={"purge": "on"}, follow_redirects=False)

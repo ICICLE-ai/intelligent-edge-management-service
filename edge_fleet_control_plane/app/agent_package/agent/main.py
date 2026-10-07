@@ -41,7 +41,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.0.1"
+AGENT_VERSION = "edge-agent-v2.1.0"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -299,7 +299,8 @@ def list_active_containers() -> List[Dict[str, Any]]:
 
 def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[str],
              operation: str, status: str, container_id: Optional[str] = None,
-             container_name: Optional[str] = None, error: Optional[str] = None) -> None:
+             container_name: Optional[str] = None, error: Optional[str] = None,
+             timings: Optional[Dict[str, Any]] = None) -> None:
     url = cfg["portal"]["base_url"].rstrip("/") + "/api/agent/ack"
     payload = {
         "device_id": cfg["device_id"],
@@ -312,6 +313,8 @@ def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[s
         "error": error,
         "ts": time.time(),
     }
+    if timings is not None:
+        payload["timings"] = dict(timings)
     if not post_json(url, payload, api_key=load_api_key()):
         log(f"ack not accepted by portal: {operation} → {status} (request_id={request_id})")
 
@@ -448,7 +451,8 @@ def prepare_host_display_for_camera() -> None:
     )
 
 
-def ensure_image(image: str, pull_policy: str) -> None:
+def ensure_image(image: str, pull_policy: str) -> bool:
+    """Make ``image`` available locally. Returns True if it was pulled."""
     inspect = subprocess.run(
         ["docker", "image", "inspect", image],
         stdout=subprocess.DEVNULL,
@@ -458,7 +462,7 @@ def ensure_image(image: str, pull_policy: str) -> None:
     if pull_policy == "never":
         if not have:
             raise RuntimeError(f"Docker image not present locally: {image}")
-        return
+        return False
     if pull_policy == "always" or not have:
         log(f"pulling image {image} (this can take several minutes on Jetson)")
         result = _subprocess_run(["docker", "pull", image], capture_output=True, text=True)
@@ -466,6 +470,8 @@ def ensure_image(image: str, pull_policy: str) -> None:
             detail = (result.stderr or result.stdout or "docker pull failed").strip()
             raise RuntimeError(f"docker pull failed: {detail[:500]}")
         log(f"image pull complete: {image}")
+        return True
+    return False
 
 
 def resolve_env_value(value: Any) -> str:
@@ -622,7 +628,21 @@ def _run_container(payload: Dict[str, Any], dpath: Path, artifact_path: Path,
 
 def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], *,
                                   request_id: str, operation: str,
-                                  skip_download: bool = False) -> None:
+                                  skip_download: bool = False,
+                                  received_mono: Optional[float] = None) -> None:
+    # Phase durations use the device's monotonic clock so they are immune to
+    # clock skew between the device and the control plane.
+    started_mono = time.monotonic()
+    origin_mono = received_mono if received_mono is not None else started_mono
+    timings: Dict[str, Any] = {
+        "agent_version": AGENT_VERSION,
+        "received_wall_ts": time.time() - (started_mono - origin_mono),
+        "queue_s": round(started_mono - origin_mono, 4),
+    }
+
+    def phase_end(key: str, began: float) -> None:
+        timings[key] = round(time.monotonic() - began, 4)
+
     deployment_uid = payload["deployment_uid"]
     artifact = payload["artifact"]
     container = payload["container"]
@@ -640,32 +660,44 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
     try:
         if skip_download and artifact_path.exists() and artifact_path.stat().st_size > 0:
             log(f"reusing cached artifact: {artifact_path}")
+            timings["artifact_cached"] = True
         else:
+            timings["artifact_cached"] = False
+            began = time.monotonic()
             url = resolve_artifact_url(cfg, artifact)
+            phase_end("resolve_s", began)
             send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
-                     operation=operation, status="DOWNLOADING")
+                     operation=operation, status="DOWNLOADING", timings=timings)
+            began = time.monotonic()
             download_file(
                 url,
                 artifact_path,
                 expected_size=artifact.get("size_bytes"),
                 filename=artifact["filename"],
             )
+            phase_end("download_s", began)
             log(f"artifact ready: {artifact_path} ({artifact_path.stat().st_size} bytes)")
+        timings["artifact_bytes"] = artifact_path.stat().st_size if artifact_path.exists() else None
 
         validate_bind_mounts(payload, dpath, artifact_path)
 
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
-                 operation=operation, status="PULLING")
+                 operation=operation, status="PULLING", timings=timings)
         pull_policy = container.get("pull_policy", "if_not_present")
         if skip_download and operation == "restart_deployment":
             pull_policy = "never"
-        ensure_image(image, pull_policy)
+        began = time.monotonic()
+        pulled = ensure_image(image, pull_policy)
+        phase_end("pull_s", began)
+        timings["image_cached"] = not pulled
 
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="STARTING",
-                 container_name=cname)
+                 container_name=cname, timings=timings)
 
+        began = time.monotonic()
         container_id = _run_container(payload, dpath, artifact_path, image=image, cname=cname)
+        phase_end("run_s", began)
         log(f"container started: {cname} ({container_id[:12]})")
         save_json(dpath / "state.json", {
             "deployment_uid": deployment_uid,
@@ -675,27 +707,32 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             "artifact_path": str(artifact_path),
             "started_at": time.time(),
         })
+        phase_end("total_s", origin_mono)
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="RUNNING",
-                 container_id=container_id, container_name=cname)
+                 container_id=container_id, container_name=cname, timings=timings)
     except Exception as e:
         log(f"{operation} failed: {e}")
+        phase_end("total_s", origin_mono)
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="FAILED",
-                 container_name=cname, error=str(e))
+                 container_name=cname, error=str(e), timings=timings)
 
 
-def deploy_model(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+def deploy_model(cfg: Dict[str, Any], payload: Dict[str, Any],
+                 received_mono: Optional[float] = None) -> None:
     _start_container_from_payload(
         cfg,
         payload,
         request_id=payload["request_id"],
         operation="deploy_model",
         skip_download=False,
+        received_mono=received_mono,
     )
 
 
-def restart_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+def restart_deployment(cfg: Dict[str, Any], payload: Dict[str, Any],
+                       received_mono: Optional[float] = None) -> None:
     deployment_uid = payload["deployment_uid"]
     request_id = payload["request_id"]
     dpath = deployment_dir(deployment_uid)
@@ -716,6 +753,7 @@ def restart_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
             request_id=request_id,
             operation="restart_deployment",
             skip_download=True,
+            received_mono=received_mono,
         )
     except Exception as e:
         log(f"restart_deployment failed: {e}")
@@ -920,7 +958,8 @@ _command_lock = threading.Lock()
 _active_deployments: Set[str] = set()
 
 
-def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any],
+                 received_mono: Optional[float] = None) -> None:
     op = payload.get("operation")
     deployment_uid = payload.get("deployment_uid")
     try:
@@ -933,14 +972,14 @@ def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
                     return
                 _active_deployments.add(deployment_uid)
             try:
-                deploy_model(cfg, payload)
+                deploy_model(cfg, payload, received_mono=received_mono)
             finally:
                 with _command_lock:
                     _active_deployments.discard(deployment_uid)
         elif op == "stop_deployment":
             stop_deployment(cfg, payload)
         elif op == "restart_deployment":
-            restart_deployment(cfg, payload)
+            restart_deployment(cfg, payload, received_mono=received_mono)
         elif op == "stream_start":
             stream_start(cfg, payload)
         elif op == "stream_stop":
@@ -956,12 +995,13 @@ def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
 
 
 def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    received_mono = time.monotonic()
     op = payload.get("operation")
     request_id = payload.get("request_id", "?")
     log(f"command received: {op} (request_id={request_id})")
     threading.Thread(
         target=_run_command,
-        args=(cfg, payload),
+        args=(cfg, payload, received_mono),
         daemon=True,
         name=f"icicle-cmd-{op or 'unknown'}",
     ).start()
