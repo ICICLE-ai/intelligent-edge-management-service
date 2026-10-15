@@ -63,13 +63,18 @@
   function setupToasts() {
     const params = new URLSearchParams(window.location.search);
     const msg = params.get("notice");
-    const level = params.get("level") || "success";
+    let level = params.get("level") || "success";
     if (!msg) return;
+    if (level === "error") level = "danger";
     const el = document.createElement("div");
     el.className = "toast toast--" + level;
-    el.textContent = msg.replace(/_/g, " ");
+    el.textContent = msg;
+    el.setAttribute("role", "alert");
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 4200);
+    const linger = (level === "danger" || level === "warn") ? 16000 : 4200;
+    const hide = () => el.remove();
+    el.addEventListener("click", hide);
+    setTimeout(hide, linger);
   }
 
   // ---------------------------------------------------------------------------

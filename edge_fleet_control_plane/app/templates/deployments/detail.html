@@ -57,7 +57,7 @@
   <header class="card__head"><h2>Per-device status</h2></header>
   <div class="card__body" style="padding:0">
     <table class="table table--compact">
-      <thead><tr><th>Device</th><th>Status</th><th>Container</th><th>Started</th><th>Updated</th><th>Error</th></tr></thead>
+      <thead><tr><th>Device</th><th>Status</th><th>Container</th><th>Started</th><th>Updated</th><th>Error</th><th>Provenance</th></tr></thead>
       <tbody>
         {% for r in d.devices %}
           <tr data-poll-device-row="{{ r.device_uid }}">
@@ -67,9 +67,10 @@
             <td class="small text-soft">{{ r.started_at | relative if r.started_at else '—' }}</td>
             <td class="small text-soft" data-poll-device-updated>{{ r.updated_at | relative }}</td>
             <td class="small" data-poll-device-error>{{ r.error_message or '' }}</td>
+            <td data-poll-device-provenance>{% if r.provenance_status %}<span class="badge {{ badge_class(r.provenance_status) }}">{{ r.provenance_status }}</span>{% else %}—{% endif %}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6"><span class="text-mute small">No device rows yet.</span></td></tr>
+          <tr><td colspan="7"><span class="text-mute small">No device rows yet.</span></td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -96,6 +97,32 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</section>
+
+<section class="section card">
+  <header class="card__head"><h2>Provenance</h2></header>
+  <div class="card__body">
+    <p class="small text-mute" style="margin-top:0">
+      Declared values come from the deploy command payload (immutable). Observed values are hashed and inspected on the device after the container starts.
+    </p>
+    <dl class="kv">
+      <dt>Declared artifact SHA-256</dt>
+      <dd class="mono small">{{ d.declared_provenance.artifact_sha256 or '— not declared on the command' }}</dd>
+      <dt>Declared image</dt>
+      <dd class="mono small">{{ d.declared_provenance.image or '—' }}{% if d.declared_provenance.image_digest %} @{{ d.declared_provenance.image_digest }}{% endif %}</dd>
+    </dl>
+    {% for r in d.devices %}
+      <h3 class="small" style="margin-top:16px">{{ r.device_name }}</h3>
+      <dl class="kv">
+        <dt>Status</dt>
+        <dd>{% if r.provenance_status %}<span class="badge {{ badge_class(r.provenance_status) }}">{{ r.provenance_status }}</span>{% else %}<span class="text-mute">waiting for RUNNING ack</span>{% endif %}{% if r.provenance_detail %} <span class="small text-mute">{{ r.provenance_detail }}</span>{% endif %}</dd>
+        <dt>Observed artifact SHA-256</dt>
+        <dd class="mono small">{{ r.observed_artifact_sha256 or '—' }}{% if r.observed_artifact_bytes %} <span class="text-mute">({{ r.observed_artifact_bytes }} bytes)</span>{% endif %}</dd>
+        <dt>Observed image</dt>
+        <dd class="mono small">{{ r.observed_image or '—' }}{% if r.observed_image_digest %}<div>{{ r.observed_image_digest }}</div>{% endif %}{% if r.observed_image_id %}<div class="text-mute">{{ r.observed_image_id }}</div>{% endif %}</dd>
+      </dl>
+    {% endfor %}
   </div>
 </section>
 

@@ -172,6 +172,7 @@ def app_detail(request: Request, model_card_uid: str):
             "active_nav": "apps",
             "card": card,
             "is_owner": model_service.is_owner(owner, card),
+            "can_manage": model_service.can_manage(owner, card),
         },
     )
 

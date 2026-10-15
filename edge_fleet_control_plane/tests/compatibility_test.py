@@ -16,6 +16,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 from fastapi.testclient import TestClient
 
@@ -45,13 +46,15 @@ seed_everything()
 client = TestClient(app)
 OWNER = os.environ["LOCAL_DEV_USERNAME"]
 
-UNETPP = "mc_seed_unetpp"                    # Orin engine: sm 8.7, TensorRT 8.5, L4T 35.4
+UNETPP = "mc_seed_unetpp"                    # Orin engine: sm 8.7, TensorRT 10.3, L4T 36.4
 FAUX_WEED = "mc_seed_yolo_faux_weed_mvs_live"  # Xavier JP4 engine: sm 7.2, TensorRT 7, L4T 32
 
 ORIN_JP5 = {"machine": "aarch64", "jetson_model": "NVIDIA Jetson Orin Nano Developer Kit",
             "gpu_compute_capability": "8.7", "l4t_version": "35.4.1",
             "tensorrt_version": "8.5.2.2", "memory_mb": 7620, "disk_free_gb": 40.0,
             "nvidia_runtime": True}
+ORIN_JP6 = {**ORIN_JP5, "jetson_model": "NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super",
+            "l4t_version": "36.4.7", "tensorrt_version": "10.3.0.30"}
 XAVIER_JP4 = {"machine": "aarch64", "jetson_model": "NVIDIA Jetson AGX Xavier Developer Kit",
               "gpu_compute_capability": "7.2", "l4t_version": "32.7.1",
               "tensorrt_version": "7.1.3.0", "memory_mb": 31002, "disk_free_gb": 120.0,
@@ -94,10 +97,9 @@ assert r.status_code in (303, 307), r.text
 mixed_group = fetch_one("SELECT group_uid FROM device_groups WHERE group_name = 'mixed-orin'")["group_uid"]
 
 orin_jp5 = make_device("orin-jp5", "jetson-orin-nano-v1", ORIN_JP5)
-orin_jp6 = make_device("orin-jp6", "jetson-orin-nano-v1",
-                       {**ORIN_JP5, "l4t_version": "36.4.0", "tensorrt_version": "10.3.0.30"})
+orin_jp6 = make_device("orin-jp6", "jetson-orin-nano-v1", ORIN_JP6)
 orin_silent = make_device("orin-no-platform", "jetson-orin-nano-v1", None)
-orin_full = make_device("orin-disk-full", "jetson-orin-nano-v1", {**ORIN_JP5, "disk_free_gb": 2.0})
+orin_full = make_device("orin-disk-full", "jetson-orin-nano-v1", {**ORIN_JP6, "disk_free_gb": 2.0})
 xavier_nx = make_device("xavier-nx-jp5", "jetson-xavier-nx-v1",
                         {**ORIN_JP5, "jetson_model": "NVIDIA Jetson Xavier NX", "gpu_compute_capability": "7.2"})
 agx_xavier = make_device("agx-xavier-gige", "jetson-agx-xavier-jp4-v1", XAVIER_JP4, camera_bus="gige-mvs")
@@ -105,8 +107,7 @@ agx_xavier_csi = make_device("agx-xavier-csi", "jetson-agx-xavier-jp4-v1", XAVIE
 agx_no_runtime = make_device("agx-xavier-no-runtime", "jetson-agx-xavier-jp4-v1",
                              {**XAVIER_JP4, "nvidia_runtime": False}, camera_bus="gige-mvs")
 make_device("group-orin-jp5", "jetson-orin-nano-v1", ORIN_JP5, group_uid=mixed_group)
-make_device("group-orin-jp6", "jetson-orin-nano-v1",
-            {**ORIN_JP5, "l4t_version": "36.4.0", "tensorrt_version": "10.3.0.30"}, group_uid=mixed_group)
+make_device("group-orin-jp6", "jetson-orin-nano-v1", ORIN_JP6, group_uid=mixed_group)
 
 no_compat_card = model_service.create_from_payload(OWNER, model_service.build_payload_from_form({
     "display_name": "No Compatibility Declared", "version": "0.1.0", "visibility": "private",
@@ -120,9 +121,9 @@ no_compat_card = model_service.create_from_payload(OWNER, model_service.build_pa
 
 # (scenario, card, target type, target uid, expected reason or None for accepted)
 SCENARIOS = [
-    ("Orin engine -> Orin Nano, matching JetPack 5", UNETPP, "DEVICE", orin_jp5, None),
+    ("Orin engine -> Orin Nano, matching JetPack 6", UNETPP, "DEVICE", orin_jp6, None),
     ("Xavier JP4 engine -> AGX Xavier JP4, GigE", FAUX_WEED, "DEVICE", agx_xavier, None),
-    ("Orin engine -> Orin Nano on JetPack 6", UNETPP, "DEVICE", orin_jp6, "TensorRT 8.5, device has TensorRT 10.3"),
+    ("Orin engine -> Orin Nano on JetPack 5", UNETPP, "DEVICE", orin_jp5, "TensorRT 10.3, device has TensorRT 8.5"),
     ("Orin engine -> Xavier NX (allowed generation)", UNETPP, "DEVICE", xavier_nx, "GPU sm 8.7, device GPU is sm 7.2"),
     ("Orin engine -> AGX Xavier", UNETPP, "DEVICE", agx_xavier, "is not in the app"),
     ("Xavier JP4 engine -> Orin Nano", FAUX_WEED, "DEVICE", orin_jp5, "is not in the app"),
@@ -131,7 +132,7 @@ SCENARIOS = [
     ("GigE app -> AGX Xavier with CSI camera", FAUX_WEED, "DEVICE", agx_xavier_csi, "GigE (MVS) cameras"),
     ("CUDA app -> device without NVIDIA runtime", FAUX_WEED, "DEVICE", agx_no_runtime, "NVIDIA container runtime"),
     ("App with no compatible generations", no_compat_card, "DEVICE", orin_jp5, "declares no compatible device generations"),
-    ("Group: one JetPack 5 + one JetPack 6 Orin", UNETPP, "GROUP", mixed_group, "group-orin-jp6"),
+    ("Group: one JetPack 5 + one JetPack 6 Orin", UNETPP, "GROUP", mixed_group, "group-orin-jp5"),
 ]
 
 results = []
@@ -155,4 +156,19 @@ width = max(len(n) for n, _, _ in results)
 print(f"\n{'scenario':{width}}  outcome   reason")
 for name, outcome, reason in results:
     print(f"{name:{width}}  {outcome:8}  {reason}")
+
+# Browser Deploy posts redirect_to; the portal must toast, not return JSON.
+before = counts()
+r = client.post("/deployments", data={
+    "model_card_uid": UNETPP, "target_type": "DEVICE", "target_uid": orin_jp5,
+    "redirect_to": f"/devices/{orin_jp5}",
+}, follow_redirects=False)
+assert r.status_code == 303, r.text
+loc = urlparse(r.headers["location"])
+qs = parse_qs(loc.query)
+assert loc.path == f"/devices/{orin_jp5}"
+assert qs.get("level") == ["danger"]
+assert "TensorRT 10.3" in unquote(qs["notice"][0])
+assert counts() == before
+
 print("\nCOMPATIBILITY TEST PASSED")

@@ -14,7 +14,7 @@ from app.repositories import events as events_repo
 from app.repositories import generations as gen_repo
 from app.repositories import groups as groups_repo
 from app.repositories import heartbeats as heartbeats_repo
-from app.routes._helpers import http_error_from_domain, redirect_with_notice
+from app.routes._helpers import form_error, http_error_from_domain, redirect_with_notice
 from app.services import (
     deployment_service,
     device_service,
@@ -299,13 +299,13 @@ def update_device(
 
 
 @router.post("/devices/{device_uid}/delete", name="device_delete")
-def delete_device(request: Request, device_uid: str):
+def delete_device(request: Request, device_uid: str, redirect_to: str = Form("")):
     owner = current_username(request)
     try:
         device_service.delete(device_uid, owner)
     except DomainError as e:
-        raise http_error_from_domain(e)
-    return RedirectResponse("/devices", status_code=303)
+        return form_error(e, redirect_to or f"/devices/{device_uid}")
+    return redirect_with_notice("/devices", notice="Device deleted")
 
 
 @router.get("/devices/{device_uid}/installer", name="device_installer")

@@ -8,7 +8,13 @@ from app.auth import authenticate_device
 from app.core.errors import DomainError
 from app.repositories import commands as commands_repo
 from app.repositories import deployments as dep_repo
-from app.services import deployment_service, enrollment_service, event_service, heartbeat_service
+from app.services import (
+    deployment_service,
+    enrollment_service,
+    event_service,
+    heartbeat_service,
+    provenance_service,
+)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -101,6 +107,27 @@ def ack(request: Request, payload: dict):
             )
             if mapped == "RUNNING":
                 dep_repo.update_status(deployment_uid, "RUNNING")
+                declared_cmd = cmd
+                if op == "restart_deployment":
+                    declared_cmd = (
+                        commands_repo.get_latest_for_deployment(
+                            deployment_uid, "deploy_model"
+                        )
+                        or cmd
+                    )
+                evaluation = provenance_service.evaluate(declared_cmd, payload)
+                observed = evaluation["observed"]
+                dep_repo.update_observed_provenance(
+                    deployment_uid,
+                    device_uid,
+                    artifact_sha256=observed.get("artifact_sha256"),
+                    artifact_bytes=observed.get("artifact_bytes"),
+                    image_id=observed.get("image_id"),
+                    image_digest=observed.get("image_digest"),
+                    image=observed.get("image"),
+                    status=evaluation["status"],
+                    detail="; ".join(evaluation["reasons"]) or None,
+                )
             elif mapped == "FAILED":
                 dep_repo.update_status(deployment_uid, "FAILED")
         elif op == "stop_deployment":

@@ -181,6 +181,47 @@ def update_device_deployment_status(deployment_uid: str, device_uid: str, *, sta
     )
 
 
+def update_observed_provenance(
+    deployment_uid: str,
+    device_uid: str,
+    *,
+    artifact_sha256: Optional[str] = None,
+    artifact_bytes: Optional[int] = None,
+    image_id: Optional[str] = None,
+    image_digest: Optional[str] = None,
+    image: Optional[str] = None,
+    status: Optional[str] = None,
+    detail: Optional[str] = None,
+) -> None:
+    ts = now_iso()
+    execute(
+        """
+        UPDATE device_deployments
+           SET observed_artifact_sha256 = ?,
+               observed_artifact_bytes = ?,
+               observed_image_id = ?,
+               observed_image_digest = ?,
+               observed_image = ?,
+               provenance_status = ?,
+               provenance_detail = ?,
+               updated_at = ?
+         WHERE deployment_uid = ? AND device_uid = ?
+        """,
+        (
+            artifact_sha256,
+            artifact_bytes,
+            image_id,
+            image_digest,
+            image,
+            status,
+            detail,
+            ts,
+            deployment_uid,
+            device_uid,
+        ),
+    )
+
+
 def list_device_deployments(deployment_uid: str) -> List[dict]:
     rows = fetch_all(
         """

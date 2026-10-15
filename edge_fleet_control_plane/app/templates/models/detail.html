@@ -27,7 +27,7 @@
     </div>
   </div>
   <div class="page-header__actions">
-    {% if is_owner %}
+    {% if can_manage %}
     <a class="btn btn--ghost" href="/apps/{{ card.model_card_uid }}/edit">Edit</a>
     {% if card.status != 'PUBLISHED' %}
       <form method="post" action="/apps/{{ card.model_card_uid }}/publish" style="display:inline-block">

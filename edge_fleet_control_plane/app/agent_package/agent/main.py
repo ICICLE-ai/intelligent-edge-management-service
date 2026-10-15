@@ -21,6 +21,7 @@ This agent has no third-party dependency beyond ``requests`` and (optionally)
 Targets Python 3.6+ so one bundle works on JetPack 4 (Xavier) and JetPack 6 (Orin).
 """
 
+import hashlib
 import json
 import os
 import platform
@@ -43,7 +44,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.2.0"
+AGENT_VERSION = "edge-agent-v2.3.0"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -397,7 +398,8 @@ def list_active_containers() -> List[Dict[str, Any]]:
 def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[str],
              operation: str, status: str, container_id: Optional[str] = None,
              container_name: Optional[str] = None, error: Optional[str] = None,
-             timings: Optional[Dict[str, Any]] = None) -> None:
+             timings: Optional[Dict[str, Any]] = None,
+             provenance: Optional[Dict[str, Any]] = None) -> None:
     url = cfg["portal"]["base_url"].rstrip("/") + "/api/agent/ack"
     payload = {
         "device_id": cfg["device_id"],
@@ -412,6 +414,8 @@ def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[s
     }
     if timings is not None:
         payload["timings"] = dict(timings)
+    if provenance is not None:
+        payload["provenance"] = dict(provenance)
     if not post_json(url, payload, api_key=load_api_key()):
         log(f"ack not accepted by portal: {operation} → {status} (request_id={request_id})")
 
@@ -697,6 +701,48 @@ def build_run_command(payload: Dict[str, Any], deployment_path: Path,
     return cmd, name
 
 
+def sha256_file(path: Path) -> Optional[str]:
+    try:
+        digest = hashlib.sha256()
+        with open(str(path), "rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError as e:
+        log("could not hash %s: %s" % (path, e))
+        return None
+
+
+def inspect_image_provenance(image: str, container_id: Optional[str]) -> Dict[str, Optional[str]]:
+    image_id = None
+    if container_id:
+        image_id = _command_output(["docker", "inspect", "-f", "{{.Image}}", container_id])
+    if not image_id and image:
+        image_id = _command_output(["docker", "inspect", "-f", "{{.Id}}", image])
+    digest = _command_output(["docker", "inspect", "-f", "{{index .RepoDigests 0}}", image]) if image else None
+    if digest in ("", "<no value>", "<none>"):
+        digest = None
+    return {"image_id": image_id, "image_digest": digest, "image": image}
+
+
+def collect_provenance(payload: Dict[str, Any], artifact_path: Path, *,
+                       image: str, container_id: Optional[str]) -> Dict[str, Any]:
+    observed = {
+        "artifact_sha256": sha256_file(artifact_path) if artifact_path.exists() else None,
+        "artifact_bytes": artifact_path.stat().st_size if artifact_path.exists() else None,
+        "container_id": container_id,
+        "agent_version": AGENT_VERSION,
+    }
+    observed.update(inspect_image_provenance(image, container_id))
+    declared = (payload.get("artifact") or {}).get("sha256")
+    if declared and observed.get("artifact_sha256") and declared.lower().replace("sha256:", "") != observed["artifact_sha256"]:
+        log("artifact sha256 drift: command declared %s, file is %s" % (declared, observed["artifact_sha256"]))
+    return observed
+
+
 def _container_running_state(container_name: str) -> Optional[bool]:
     """Return True if running, False if stopped, None if the container does not exist."""
     result = _subprocess_run(
@@ -796,6 +842,7 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
         container_id = _run_container(payload, dpath, artifact_path, image=image, cname=cname)
         phase_end("run_s", began)
         log(f"container started: {cname} ({container_id[:12]})")
+        provenance = collect_provenance(payload, artifact_path, image=image, container_id=container_id)
         save_json(dpath / "state.json", {
             "deployment_uid": deployment_uid,
             "container_name": cname,
@@ -803,11 +850,13 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             "image": image,
             "artifact_path": str(artifact_path),
             "started_at": time.time(),
+            "provenance": provenance,
         })
         phase_end("total_s", origin_mono)
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="RUNNING",
-                 container_id=container_id, container_name=cname, timings=timings)
+                 container_id=container_id, container_name=cname, timings=timings,
+                 provenance=provenance)
     except Exception as e:
         log(f"{operation} failed: {e}")
         phase_end("total_s", origin_mono)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ids import gen_uid
+from app.repositories import deployments as dep_repo
 from app.repositories import devices as devices_repo
 from app.repositories import generations as gen_repo
 from app.repositories import groups as groups_repo
@@ -139,13 +140,74 @@ def update_generation(device_uid: str, owner: str, generation_uid: str) -> dict:
     return get(device_uid, owner)
 
 
+_LIVE_ON_DEVICE = {
+    "RUNNING", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING", "STOPPING",
+    "MQTT_SENT",
+}
+
+
+def _status_on_device(dep: dict, device_uid: str) -> str:
+    rows = [
+        r for r in dep_repo.list_device_deployments(dep["deployment_uid"])
+        if r["device_uid"] == device_uid
+    ]
+    row_status = rows[0]["status"] if rows else None
+    parent = dep.get("status") or ""
+    if row_status in _LIVE_ON_DEVICE:
+        return row_status
+    if parent in _LIVE_ON_DEVICE:
+        return parent
+    return row_status or parent
+
+
 def delete(device_uid: str, owner: str) -> None:
+    """Remove the device record.
+
+    Live work on the board (RUNNING / pulling / stopping) is refused so the
+    operator can Stop or Delete the deployment first — that is what sends
+    purge to the agent. Inactive device-targeted rows are cancelled in the
+    portal so they do not become orphans. Group deployments that still have
+    other devices are left alone.
+    """
     device = get(device_uid, owner)
+    blocking = []
+    to_cancel = []
+    for dep in dep_repo.list_for_device(device_uid, owner):
+        status = _status_on_device(dep, device_uid)
+        if status in _LIVE_ON_DEVICE:
+            blocking.append(dep)
+            continue
+        others = [
+            r for r in dep_repo.list_device_deployments(dep["deployment_uid"])
+            if r["device_uid"] != device_uid
+        ]
+        if dep.get("target_type") == "GROUP" and others:
+            continue
+        if dep.get("status") != "CANCELLED":
+            to_cancel.append(dep)
+
+    if blocking:
+        labels = []
+        for dep in blocking[:3]:
+            name = dep.get("model_display_name") or dep.get("deployment_uid")
+            labels.append("%s (%s)" % (name, _status_on_device(dep, device_uid)))
+        extra = " | …" if len(blocking) > 3 else ""
+        raise ConflictError(
+            "Stop or delete the running deployment on this device first: "
+            + ", ".join(labels)
+            + extra
+        )
+
+    for dep in to_cancel:
+        dep_repo.update_status(dep["deployment_uid"], "CANCELLED")
     event_service.record(
         "DEVICE_DELETED",
         f"Device '{device['device_name']}' deleted",
         owner=owner,
-        payload={"device_uid": device_uid},
+        payload={
+            "device_uid": device_uid,
+            "cancelled_deployments": [d["deployment_uid"] for d in to_cancel],
+        },
     )
     devices_repo.delete(device_uid, owner)
 

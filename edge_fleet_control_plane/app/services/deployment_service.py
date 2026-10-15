@@ -30,7 +30,13 @@ from app.repositories import devices as devices_repo
 from app.repositories import groups as groups_repo
 from app.repositories import model_cards as mc_repo
 from app.repositories import mqtt_audit as audit_repo
-from app.services import compatibility_service, device_capabilities, event_service, mqtt_service
+from app.services import (
+    compatibility_service,
+    device_capabilities,
+    event_service,
+    mqtt_service,
+    provenance_service,
+)
 
 log = get_logger("deployment")
 
@@ -355,6 +361,9 @@ def _publish_command(
     topic = mqtt_service.topic_for(dep["target_type"], dep["target_uid"])
     settings = get_settings()
     device_uid = dep["target_uid"] if dep["target_type"] == "DEVICE" else None
+    target_gone = bool(device_uid) and devices_repo.get_any(device_uid) is None
+    if target_gone:
+        device_uid = None
     commands_repo.insert(
         command_uid=gen_uid("cmd"),
         owner=owner,
@@ -379,7 +388,10 @@ def _publish_command(
     status = "RECORDED"
     err: Optional[str] = None
     sent_at: Optional[str] = None
-    if settings.mqtt.enabled:
+    if target_gone:
+        err = "target device no longer exists"
+        commands_repo.update_send_status(request_id, status=status, error=err)
+    elif settings.mqtt.enabled:
         try:
             mqtt_service.publish(topic, payload)
             status = "MQTT_SENT"
@@ -548,6 +560,20 @@ def stop(*, owner: str, deployment_uid: str, purge: bool = False) -> dict:
         raise NotFoundError("Deployment not found")
     reconcile_deployment_status(deployment_uid)
     dep = dep_repo.get(deployment_uid, owner)
+    if _target_device_gone(dep):
+        _settle_local(
+            deployment_uid,
+            "STOPPED",
+            error="Target device was deleted — nothing sent to the agent",
+        )
+        event_service.record(
+            "DEPLOYMENT_STOP_SKIPPED_NO_DEVICE",
+            f"Stop skipped; target device {dep.get('target_uid')} is gone",
+            severity="WARN",
+            owner=owner,
+            deployment_uid=deployment_uid,
+        )
+        return get_full(deployment_uid, owner)
     if dep["status"] in {"STOPPED", "FAILED"}:
         if purge:
             pass  # purge-only cleanup of a stopped deployment
@@ -645,17 +671,26 @@ def cancel(*, owner: str, deployment_uid: str) -> dict:
         raise ConflictError("Deployment is already removed.")
 
     purge_sent = False
-    try:
-        stop(owner=owner, deployment_uid=deployment_uid, purge=True)
-        purge_sent = True
-    except DomainError as exc:
+    if _target_device_gone(dep):
         event_service.record(
             "DEPLOYMENT_CANCEL_PURGE_SKIPPED",
-            f"Purge before remove skipped: {exc}",
+            "Purge before remove skipped: target device no longer exists",
             severity="WARN",
             owner=owner,
             deployment_uid=deployment_uid,
         )
+    else:
+        try:
+            stop(owner=owner, deployment_uid=deployment_uid, purge=True)
+            purge_sent = True
+        except DomainError as exc:
+            event_service.record(
+                "DEPLOYMENT_CANCEL_PURGE_SKIPPED",
+                f"Purge before remove skipped: {exc}",
+                severity="WARN",
+                owner=owner,
+                deployment_uid=deployment_uid,
+            )
 
     for dd in dep_repo.list_device_deployments(deployment_uid):
         if dd["status"] not in {"STOPPED", "FAILED"}:
@@ -840,6 +875,9 @@ def poll_snapshot(deployment_uid: str, owner: str) -> dict:
             "container_name": row.get("container_name"),
             "error_message": row.get("error_message"),
             "updated_at": row.get("updated_at"),
+            "provenance_status": row.get("provenance_status"),
+            "observed_artifact_sha256": row.get("observed_artifact_sha256"),
+            "observed_image_digest": row.get("observed_image_digest"),
         }
         if media.mode == "mediamtx":
             entry["hls_url"] = media.hls_url(row["device_uid"])
@@ -869,6 +907,8 @@ def get_full(deployment_uid: str, owner: str) -> dict:
     dep["devices"] = dep_repo.list_device_deployments(deployment_uid)
     dep["commands"] = commands_repo.list_for_deployment(deployment_uid)
     dep["card"] = mc_repo.get_full(dep["model_card_uid"])
+    deploy_cmd = next((c for c in dep["commands"] if c.get("operation") == "deploy_model"), None)
+    dep["declared_provenance"] = provenance_service.declared_from_command(deploy_cmd)
     return dep
 
 
@@ -879,6 +919,21 @@ def counts(owner: str) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _target_device_gone(dep: dict) -> bool:
+    if (dep.get("target_type") or "").upper() != "DEVICE":
+        return False
+    return devices_repo.get_any(dep.get("target_uid") or "") is None
+
+
+def _settle_local(deployment_uid: str, status: str, *, error: Optional[str] = None) -> None:
+    for dd in dep_repo.list_device_deployments(deployment_uid):
+        if dd["status"] not in {"STOPPED", "FAILED"}:
+            dep_repo.update_device_deployment_status(
+                deployment_uid, dd["device_uid"], status="STOPPED", error=error
+            )
+    dep_repo.update_status(deployment_uid, status)
+
 
 def _resolve_target(owner: str, target_type: str, target_uid: str) -> tuple[List[dict], str]:
     if target_type == "DEVICE":

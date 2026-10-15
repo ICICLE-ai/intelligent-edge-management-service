@@ -8,7 +8,7 @@
     "version": "1.0.0",
     "task_type": "segmentation",
     "framework": "tensorrt",
-    "description": "TensorRT FP16 engine for corn residue semantic segmentation at 512x768. Designed for Jetson Orin Nano; tested with NVIDIA L4T r35.4.",
+    "description": "TensorRT FP16 engine for corn residue semantic segmentation at 512x768. Designed for Jetson Orin Nano; built with TensorRT 10.3 on NVIDIA L4T r36.4 (JetPack 6).",
     "license": "Apache-2.0",
     "homepage_url": "https://icicle.ai/models/unetpp",
     "tags": ["agriculture", "segmentation", "tensorrt", "fp16"],
@@ -23,8 +23,8 @@
       "size_bytes": 99712684,
       "content_type": "application/octet-stream",
       "engine_compute_capability": "8.7",
-      "engine_tensorrt_version": "8.5",
-      "engine_l4t_version": "35.4",
+      "engine_tensorrt_version": "10.3",
+      "engine_l4t_version": "36.4",
       "engine_precision": "fp16"
     },
     "container": {
@@ -81,8 +81,8 @@
       "size_bytes": 99712684,
       "content_type": "application/octet-stream",
       "engine_compute_capability": "8.7",
-      "engine_tensorrt_version": "8.5",
-      "engine_l4t_version": "35.4",
+      "engine_tensorrt_version": "10.3",
+      "engine_l4t_version": "36.4",
       "engine_precision": "fp16"
     },
     "container": {

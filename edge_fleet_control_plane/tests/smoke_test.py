@@ -130,13 +130,13 @@ r = client.post("/api/agent/heartbeat", json={
     "memory_used_mb": 2048,
     "active_containers": [],
     "platform": {"machine": "aarch64", "gpu_compute_capability": "8.7",
-                 "l4t_version": "35.4.1", "tensorrt_version": "8.5.2.2",
+                 "l4t_version": "36.4.7", "tensorrt_version": "10.3.0.30",
                  "memory_mb": 7620, "disk_free_gb": 40.0, "nvidia_runtime": True},
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 reported = fetch_one("SELECT platform_json, platform_reported_at FROM devices WHERE device_uid=?",
                      (d["device_uid"],))
-assert reported["platform_reported_at"] and json.loads(reported["platform_json"])["l4t_version"] == "35.4.1"
+assert reported["platform_reported_at"] and json.loads(reported["platform_json"])["l4t_version"] == "36.4.7"
 
 # --------------------------------------------------------------------------- #
 # Publish a fresh app via the web form
@@ -324,11 +324,45 @@ r = client.post("/api/agent/ack", json={
     "container_id": "abcd1234",
     "container_name": payload["container"]["container_name"],
     "timings": deploy_timings,
+    "provenance": {
+        "artifact_sha256": "aa" * 32,
+        "artifact_bytes": 99712684,
+        "image": "habg21/unet-trt-infer:latest",
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image_digest": "habg21/unet-trt-infer@sha256:" + ("cc" * 32),
+        "container_id": "abcd1234",
+    },
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
                (dep["deployment_uid"], d["device_uid"]))
 assert dd and dd["status"] == "RUNNING", dict(dd or {})
+assert dd["observed_artifact_sha256"] == "aa" * 32, dict(dd)
+assert dd["provenance_status"] == "UNDECLARED", dict(dd)
+
+from app.services import provenance_service  # noqa: E402
+matched, _ = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="AA" * 32,
+    declared_digest="sha256:" + ("cc" * 32), observed_digest=("cc" * 32),
+)
+assert matched == "MATCHED", matched
+repo_digest = "habg21/unet-trt-infer-live@sha256:" + ("cc" * 32)
+matched_repo, _ = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="aa" * 32,
+    declared_digest="sha256:" + ("cc" * 32), observed_digest=repo_digest,
+)
+assert matched_repo == "MATCHED", matched_repo
+drifted, reasons = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="dd" * 32,
+)
+assert drifted == "DRIFT" and reasons, (drifted, reasons)
+
+r = client.post(f"/devices/{d['device_uid']}/delete", follow_redirects=False)
+assert r.status_code in (303, 307), r.text
+assert fetch_one("SELECT 1 FROM devices WHERE device_uid=?", (d["device_uid"],)), (
+    "must not delete a device with a RUNNING deployment"
+)
+assert "notice=" in (r.headers.get("location") or "")
 
 # Soft stop — keeps image and artifacts on device
 r = client.post(f"/deployments/{dep['deployment_uid']}/stop", follow_redirects=False)
@@ -505,6 +539,25 @@ assert updated and "Updated" in updated["display_name"], dict(updated or {})
 r = client.post(f"/devices/{d['device_uid']}/delete", follow_redirects=False)
 assert r.status_code in (303, 307), f"delete device failed: {r.status_code} {r.text[:400]}"
 assert not fetch_one("SELECT 1 FROM devices WHERE device_uid=?", (d["device_uid"],))
+settled = fetch_one(
+    "SELECT status FROM deployments WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+assert settled and settled["status"] == "CANCELLED", dict(settled or {})
+
+# Orphan: parent deployment remains after the device row is gone. Delete must
+# settle it locally (no purge command) instead of FK-500.
+execute(
+    "UPDATE deployments SET status='PENDING' WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+r = client.post(f"/deployments/{dep['deployment_uid']}/delete", follow_redirects=False)
+assert r.status_code in (303, 307), f"delete orphan deployment: {r.status_code} {r.text[:400]}"
+orphan = fetch_one(
+    "SELECT status FROM deployments WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+assert orphan and orphan["status"] == "CANCELLED", dict(orphan or {})
 
 # --------------------------------------------------------------------------- #
 # Pages render                                                                 #

@@ -19,7 +19,7 @@
   </div>
   <div class="page-header__actions">
     <a class="btn btn--outline" href="/devices/{{ device.device_uid }}/installer">Download Installer</a>
-    <form method="post" action="/devices/{{ device.device_uid }}/delete" data-confirm="Delete this device record? This does not uninstall the agent." style="display:inline-block">
+    <form method="post" action="/devices/{{ device.device_uid }}/delete" data-confirm="Delete this device record? Inactive deployments for it will be removed from the portal. Stop or delete a running deployment first so the board can be cleaned up. This does not uninstall the agent." style="display:inline-block">
       <button class="btn btn--ghost">Delete</button>
     </form>
   </div>

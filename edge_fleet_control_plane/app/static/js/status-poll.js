@@ -134,6 +134,10 @@
           if (err) err.textContent = row.error_message || "";
           const updated = tr.querySelector("[data-poll-device-updated]");
           if (updated) updated.textContent = relativeTime(row.updated_at);
+          const prov = tr.querySelector("[data-poll-device-provenance]");
+          if (prov && row.provenance_status) {
+            setBadge(prov.querySelector(".badge") || prov, row.provenance_status);
+          }
         });
 
         const streamRoot = document.getElementById("inference-streams");

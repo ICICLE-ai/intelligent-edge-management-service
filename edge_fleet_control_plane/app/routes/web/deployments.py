@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.auth import current_username
 from app.core.errors import DomainError
 from app.core.templates import templates
-from app.routes._helpers import http_error_from_domain, redirect_with_notice
+from app.routes._helpers import form_error, http_error_from_domain, redirect_with_notice
 from app.services import deployment_service, stream_service
 
 router = APIRouter(tags=["web"])
@@ -73,7 +73,7 @@ def create_deployment(
             notes=notes or None,
         )
     except DomainError as e:
-        raise http_error_from_domain(e)
+        return form_error(e, redirect_to)
     if redirect_to:
         return redirect_with_notice(redirect_to, notice="Deployment dispatched")
     return RedirectResponse(f"/deployments/{dep['deployment_uid']}", status_code=303)
@@ -86,7 +86,7 @@ def stop_deployment(request: Request, deployment_uid: str, purge: str = Form("")
     try:
         deployment_service.stop(owner=owner, deployment_uid=deployment_uid, purge=(purge == "on"))
     except DomainError as e:
-        raise http_error_from_domain(e)
+        return form_error(e, redirect_to or f"/deployments/{deployment_uid}")
     target = redirect_to or f"/deployments/{deployment_uid}"
     notice = "Purge command dispatched" if purge == "on" else "Stop command dispatched"
     return redirect_with_notice(target, notice=notice)
@@ -98,7 +98,7 @@ def restart_deployment(request: Request, deployment_uid: str, redirect_to: str =
     try:
         deployment_service.restart(owner=owner, deployment_uid=deployment_uid)
     except DomainError as e:
-        raise http_error_from_domain(e)
+        return form_error(e, redirect_to or f"/deployments/{deployment_uid}")
     target = redirect_to or f"/deployments/{deployment_uid}"
     return redirect_with_notice(target, notice="Restart command dispatched")
 
@@ -117,11 +117,11 @@ def dismiss_deployment(request: Request, deployment_uid: str, redirect_to: str =
 @router.post("/deployments/{deployment_uid}/cancel", name="deployment_cancel")
 def cancel_deployment(request: Request, deployment_uid: str, redirect_to: str = Form("")):
     owner = current_username(request)
+    target = redirect_to or "/deployments?scope=active"
     try:
         deployment_service.cancel(owner=owner, deployment_uid=deployment_uid)
     except DomainError as e:
-        raise http_error_from_domain(e)
-    target = redirect_to or "/deployments?scope=active"
+        return form_error(e, target)
     return redirect_with_notice(target, notice="Deployment deleted")
 
 
@@ -137,5 +137,5 @@ def redispatch_deployment(request: Request, deployment_uid: str, redirect_to: st
     try:
         deployment_service.redispatch(owner=owner, deployment_uid=deployment_uid)
     except DomainError as e:
-        return redirect_with_notice(target, notice=str(e), level="error")
+        return redirect_with_notice(target, notice=str(e), level="danger")
     return redirect_with_notice(target, notice="Deployment re-dispatched")
