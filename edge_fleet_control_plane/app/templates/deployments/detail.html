@@ -7,7 +7,7 @@
 {% set all_devices_terminal = d.devices and d.devices | length > 0 and (d.devices | selectattr('status', 'in', ['STOPPED', 'FAILED']) | list | length) == (d.devices | length) %}
 {% set effective_status = 'STOPPED' if d.status == 'STOPPING' and all_devices_terminal else d.status %}
 {% set redispatchable = effective_status in ['PENDING', 'RECORDED', 'DELIVERING', 'MQTT_FAILED', 'MQTT_SENT'] %}
-{% set stoppable = effective_status in ['RUNNING', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
+{% set stoppable = effective_status in ['RUNNING', 'DEGRADED', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
 {% set restartable = effective_status == 'STOPPED' %}
 {% set dismissable = effective_status in ['STOPPING', 'STARTING', 'DELIVERING', 'DOWNLOADING', 'PULLING', 'PENDING', 'RECORDED', 'MQTT_FAILED', 'MQTT_SENT'] %}
 {% set deletable = effective_status not in ['CANCELLED'] %}

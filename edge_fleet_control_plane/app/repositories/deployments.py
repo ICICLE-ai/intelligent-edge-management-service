@@ -124,7 +124,8 @@ def count_for_owner(owner: str) -> dict:
     by_status = {r["status"]: r["c"] for r in rows}
     return {
         "total": sum(by_status.values()),
-        "active": by_status.get("RUNNING", 0) + by_status.get("DELIVERING", 0) + by_status.get("PENDING", 0),
+        "active": by_status.get("RUNNING", 0) + by_status.get("DEGRADED", 0)
+        + by_status.get("DELIVERING", 0) + by_status.get("PENDING", 0),
         "stopped": by_status.get("STOPPED", 0),
         "failed": by_status.get("FAILED", 0),
         "by_status": by_status,

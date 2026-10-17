@@ -313,7 +313,8 @@ def _dispatch_deploy(
 
 
 _ACTIVE_DEPLOYMENT_STATUSES = {
-    "RUNNING", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING", "STOPPING",
+    "RUNNING", "DEGRADED", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING",
+    "STOPPING",
 }
 
 
@@ -640,7 +641,7 @@ def dismiss(*, owner: str, deployment_uid: str) -> dict:
         raise NotFoundError("Deployment not found")
     if dep["status"] in {"STOPPED", "FAILED", "CANCELLED"}:
         raise ConflictError("Deployment is already settled.")
-    if dep["status"] == "RUNNING":
+    if dep["status"] in {"RUNNING", "DEGRADED"}:
         raise ConflictError("Use Stop to request the agent to remove the container.")
 
     for dd in dep_repo.list_device_deployments(deployment_uid):
@@ -790,6 +791,10 @@ def effective_status(parent_status: str, device_rows: List[dict]) -> str:
         return "FAILED" if statuses == {"FAILED"} else "STOPPED"
     if parent in {"STARTING", "DELIVERING", "DOWNLOADING", "PULLING"} and statuses == {"RUNNING"}:
         return "RUNNING"
+    if parent in {"RUNNING", "DEGRADED"} and "DEGRADED" in statuses:
+        return "DEGRADED"
+    if parent == "DEGRADED" and statuses == {"RUNNING"}:
+        return "RUNNING"
     if parent in {"STARTING", "DELIVERING", "DOWNLOADING", "PULLING"} and statuses <= terminal:
         return "FAILED" if "FAILED" in statuses else "STOPPED"
     return parent
@@ -814,7 +819,7 @@ def reconcile_deployment_status(deployment_uid: str) -> None:
         dep = dep_repo.get_any(deployment_uid) or dep
 
     settled = effective_status(dep["status"], rows)
-    if settled != dep["status"] and settled in {"STOPPED", "FAILED", "RUNNING"}:
+    if settled != dep["status"] and settled in {"STOPPED", "FAILED", "RUNNING", "DEGRADED"}:
         dep_repo.update_status(deployment_uid, settled)
 
 

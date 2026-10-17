@@ -141,8 +141,8 @@ def update_generation(device_uid: str, owner: str, generation_uid: str) -> dict:
 
 
 _LIVE_ON_DEVICE = {
-    "RUNNING", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING", "STOPPING",
-    "MQTT_SENT",
+    "RUNNING", "DEGRADED", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING",
+    "STOPPING", "MQTT_SENT",
 }
 
 

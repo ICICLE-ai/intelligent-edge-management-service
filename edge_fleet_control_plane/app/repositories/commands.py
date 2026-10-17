@@ -116,3 +116,40 @@ def mark_acked(request_id: str, response: dict) -> None:
 def get_latest_open_for_deployment(deployment_uid: str, operation: str) -> Optional[dict]:
     """Backward-compatible alias — returns latest command row for the operation."""
     return get_latest_for_deployment(deployment_uid, operation)
+
+
+_PENDING_COMMAND_STATUSES = ("RECORDED", "MQTT_SENT", "MQTT_FAILED")
+_PENDING_OPERATIONS = (
+    "deploy_model",
+    "stop_deployment",
+    "restart_deployment",
+    "stream_start",
+    "stream_stop",
+)
+
+
+def list_unacked_payloads_for_device(device_uid: str, limit: int = 20) -> List[dict]:
+    """MQTT payloads the agent never acked — delivered again on heartbeat."""
+    placeholders = ",".join("?" for _ in _PENDING_COMMAND_STATUSES)
+    op_placeholders = ",".join("?" for _ in _PENDING_OPERATIONS)
+    rows = fetch_all(
+        """
+        SELECT payload_json FROM device_commands
+         WHERE (device_uid = ? OR (target_type = 'DEVICE' AND target_uid = ?))
+           AND acked_at IS NULL
+           AND status IN (%s)
+           AND operation IN (%s)
+         ORDER BY created_at ASC
+         LIMIT ?
+        """ % (placeholders, op_placeholders),
+        (device_uid, device_uid) + _PENDING_COMMAND_STATUSES + _PENDING_OPERATIONS + (limit,),
+    )
+    out: List[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("operation"):
+            out.append(payload)
+    return out

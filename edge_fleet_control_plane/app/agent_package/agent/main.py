@@ -12,8 +12,16 @@ A simpler model than the original v1 agent:
 * `restart_deployment` creates a fresh container from the saved spec using
   the cached image and model files — no re-download or image pull.
 * HTTPs heartbeats every N seconds; MQTT (paho) for inbound commands.
+  Heartbeats also pull commands the broker missed while this board was off.
 * Acks back to the portal over HTTPs (`/api/agent/ack`) so the UI can show
   real per-device delivery status.
+* On agent start, restore from ``deploy_payload.json``: wait until Docker,
+  Argus, and the RTSP ingest host are reachable, then relaunch from the saved
+  spec (same as Restart: cached image + artifact, no re-download). A heartbeat
+  only fills in if the container later dies. Stop records ``desired=stopped``
+  so a reboot does not bring that workload back.
+* RUNNING means ``docker inspect`` still shows the container running shortly
+  after ``docker run -d``, not merely that the run command returned.
 
 This agent has no third-party dependency beyond ``requests`` and (optionally)
 ``paho-mqtt``. It runs as a systemd unit.
@@ -33,6 +41,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -44,7 +53,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.3.0"
+AGENT_VERSION = "edge-agent-v2.4.1"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -169,9 +178,9 @@ def download_file(url: str, destination: Path, *, expected_size: Optional[int] =
         _safe_unlink(tmp)
 
 
-def post_json(url: str, payload: Dict[str, Any], *, timeout: int = 15, retries: int = 3,
-              api_key: Optional[str] = None) -> bool:
-    """POST JSON to the portal; return True when the server accepts the payload."""
+def post_json_response(url: str, payload: Dict[str, Any], *, timeout: int = 15,
+                       retries: int = 3, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """POST JSON to the portal; return the parsed object, or None on failure."""
     headers = _portal_headers()
     if api_key:
         headers["Authorization"] = "Bearer %s" % api_key
@@ -179,13 +188,23 @@ def post_json(url: str, payload: Dict[str, Any], *, timeout: int = 15, retries: 
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
             if resp.status_code < 400:
-                return True
+                try:
+                    data = resp.json()
+                except Exception:
+                    return {}
+                return data if isinstance(data, dict) else {}
             log(f"post {url} rejected ({resp.status_code}): {resp.text[:300]}")
         except Exception as e:
             log(f"post {url} failed (attempt {attempt}/{retries}): {e}")
         if attempt < retries:
             time.sleep(min(2 * attempt, 6))
-    return False
+    return None
+
+
+def post_json(url: str, payload: Dict[str, Any], *, timeout: int = 15, retries: int = 3,
+              api_key: Optional[str] = None) -> bool:
+    """POST JSON to the portal; return True when the server accepts the payload."""
+    return post_json_response(url, payload, timeout=timeout, retries=retries, api_key=api_key) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +382,11 @@ def heartbeat_loop(cfg: Dict[str, Any]) -> None:
                 "platform": detect_platform(),
                 "timestamp": time.time(),
             }
-            post_json(url, payload, api_key=api_key)
+            body = post_json_response(url, payload, api_key=api_key) or {}
+            for command in body.get("pending_commands") or []:
+                if isinstance(command, dict) and command.get("operation"):
+                    handle_command(cfg, command)
+            restore_desired_deployments(cfg, reason="heartbeat")
         except Exception as e:
             log(f"heartbeat failed: {e}")
         time.sleep(interval)
@@ -755,8 +778,76 @@ def _container_running_state(container_name: str) -> Optional[bool]:
     return result.stdout.strip().lower() == "true"
 
 
+def _container_logs_tail(container_name: str, lines: int = 40) -> str:
+    result = _subprocess_run(
+        ["docker", "logs", "--tail", str(lines), container_name],
+        capture_output=True,
+        text=True,
+    )
+    text = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+    return text
+
+
+def _confirm_container_running(container_name: str, timeout_s: float = 2.5) -> None:
+    """Fail if the container is not still Running after a short grace period."""
+    deadline = time.monotonic() + timeout_s
+    saw_running = False
+    last_state = None  # type: Optional[bool]
+    while time.monotonic() < deadline:
+        last_state = _container_running_state(container_name)
+        if last_state is True:
+            saw_running = True
+        elif last_state is False:
+            logs = _container_logs_tail(container_name)
+            raise RuntimeError(
+                "container exited after start: %s" % (logs[:400] or container_name)
+            )
+        elif last_state is None and saw_running:
+            raise RuntimeError("container disappeared after start: %s" % container_name)
+        time.sleep(0.35)
+    if not saw_running or _container_running_state(container_name) is not True:
+        logs = _container_logs_tail(container_name)
+        raise RuntimeError(
+            "container not running after docker start (state=%s): %s"
+            % (last_state, logs[:400] or container_name)
+        )
+
+
+def _load_json_if_exists(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        return load_json(path)
+    except Exception as e:
+        log("could not read %s: %s" % (path, e))
+        return None
+
+
+def _merge_state(dpath: Path, **fields: Any) -> Dict[str, Any]:
+    state = _load_json_if_exists(dpath / "state.json") or {}
+    state.update(fields)
+    save_json(dpath / "state.json", state)
+    return state
+
+
+def _deployment_desired_running(state: Optional[Dict[str, Any]]) -> bool:
+    if not state:
+        return False
+    desired = state.get("desired")
+    if desired == "stopped":
+        return False
+    if desired == "running":
+        return True
+    # Agent < 2.4.0 wrote state without desired. Stop already docker-rm'd the
+    # container; a reboot leftover is still present as a stopped container.
+    cname = state.get("container_name")
+    if not cname:
+        return False
+    return _container_running_state(cname) is not None
+
+
 def _run_container(payload: Dict[str, Any], dpath: Path, artifact_path: Path,
-                   *, image: str, cname: str) -> str:
+                   *, image: str, cname: str, confirm_s: float = 2.5) -> str:
     prepare_host_display_for_camera()
     subprocess.run(["docker", "rm", "-f", cname],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -766,7 +857,9 @@ def _run_container(payload: Dict[str, Any], dpath: Path, artifact_path: Path,
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "docker run failed").strip()
         raise RuntimeError(detail[:500])
-    return result.stdout.strip()
+    container_id = result.stdout.strip()
+    _confirm_container_running(cname, timeout_s=confirm_s)
+    return container_id
 
 
 def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], *,
@@ -827,7 +920,7 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="PULLING", timings=timings)
         pull_policy = container.get("pull_policy", "if_not_present")
-        if skip_download and operation == "restart_deployment":
+        if skip_download and operation in {"restart_deployment", "recover_deployment"}:
             pull_policy = "never"
         began = time.monotonic()
         pulled = ensure_image(image, pull_policy)
@@ -850,6 +943,9 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             "image": image,
             "artifact_path": str(artifact_path),
             "started_at": time.time(),
+            "desired": "running",
+            "last_request_id": request_id,
+            "last_operation": operation,
             "provenance": provenance,
         })
         phase_end("total_s", origin_mono)
@@ -917,6 +1013,14 @@ def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     dpath = deployment_dir(deployment_uid)
 
     try:
+        if dpath.exists() and not purge:
+            _merge_state(
+                dpath,
+                desired="stopped",
+                stopped_at=time.time(),
+                last_request_id=request_id,
+                last_operation="stop_deployment",
+            )
         if purge:
             subprocess.run(["docker", "rm", "-f", cname], check=False)
             if image:
@@ -936,6 +1040,255 @@ def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation="stop_deployment", status="FAILED",
                  container_name=cname, error=str(e))
+
+
+_restore_lock = threading.Lock()
+_restore_fail_until: Dict[str, float] = {}
+_seen_request_ids: Set[str] = set()
+
+
+def _wait_for_docker(timeout_s: float = 90.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if docker_running():
+            return True
+        log("waiting for docker before recover")
+        time.sleep(2)
+    log("docker not ready; recover will retry on heartbeat")
+    return False
+
+
+def _ingest_endpoints(payload: Dict[str, Any]) -> List[Tuple[str, int]]:
+    endpoints: List[Tuple[str, int]] = []
+    seen = set()  # type: Set[Tuple[str, int]]
+    for entry in (payload.get("runtime") or {}).get("environment") or []:
+        key = entry.get("key") or ""
+        if not key.startswith("STREAM_INGEST_URL"):
+            continue
+        parsed = urlparse(entry.get("value") or "")
+        host = parsed.hostname
+        if not host:
+            continue
+        if parsed.port:
+            port = int(parsed.port)
+        elif parsed.scheme in ("rtsps", "https"):
+            port = 443
+        else:
+            port = 554
+        item = (host, port)
+        if item not in seen:
+            seen.add(item)
+            endpoints.append(item)
+    return endpoints
+
+
+def _tcp_open(host: str, port: int, timeout_s: float = 3.0) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout_s)
+    try:
+        sock.connect((host, port))
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def _wait_for_argus(timeout_s: float = 30.0) -> bool:
+    sock_path = Path("/tmp/argus_socket")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if sock_path.exists():
+            return True
+        log("waiting for Argus socket %s" % sock_path)
+        time.sleep(1)
+    log("Argus socket not ready; continuing")
+    return False
+
+
+def _wait_for_ingest(payload: Dict[str, Any], timeout_s: float = 60.0) -> bool:
+    endpoints = _ingest_endpoints(payload)
+    if not endpoints:
+        return True
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if all(_tcp_open(host, port) for host, port in endpoints):
+            log("ingest reachable: %s" % ", ".join("%s:%s" % e for e in endpoints))
+            return True
+        log("waiting for ingest %s" % ", ".join("%s:%s" % e for e in endpoints))
+        time.sleep(2)
+    log("ingest not reachable yet; launching anyway")
+    return False
+
+
+def _wait_for_recover_ready(payload: Dict[str, Any]) -> None:
+    _wait_for_docker()
+    _wait_for_argus()
+    _wait_for_ingest(payload)
+
+
+def _ack_recovered(cfg: Dict[str, Any], payload: Dict[str, Any], dpath: Path,
+                   *, cname: str, container_id: Optional[str], status: str,
+                   error: Optional[str] = None) -> None:
+    uid = payload["deployment_uid"]
+    request_id = "recover-%s-%s" % (uid, int(time.time()))
+    artifact = payload.get("artifact") or {}
+    artifact_path = Path(
+        (_load_json_if_exists(dpath / "state.json") or {}).get("artifact_path")
+        or str(dpath / "model" / (artifact.get("filename") or "model.bin"))
+    )
+    container = payload.get("container") or {}
+    image = container.get("image") or "%s:%s" % (
+        container.get("image_repository") or "",
+        container.get("image_tag") or "latest",
+    )
+    provenance = None
+    if status == "RUNNING":
+        provenance = collect_provenance(
+            payload, artifact_path, image=image, container_id=container_id
+        )
+        _merge_state(
+            dpath,
+            deployment_uid=uid,
+            container_name=cname,
+            container_id=container_id,
+            image=image,
+            artifact_path=str(artifact_path),
+            desired="running",
+            last_operation="recover_deployment",
+            recovered_at=time.time(),
+            provenance=provenance,
+        )
+    send_ack(
+        cfg,
+        request_id=request_id,
+        deployment_uid=uid,
+        operation="recover_deployment",
+        status=status,
+        container_id=container_id,
+        container_name=cname,
+        error=error,
+        provenance=provenance,
+    )
+
+
+def _relaunch_from_payload(payload: Dict[str, Any], dpath: Path,
+                           state: Dict[str, Any], cname: str,
+                           confirm_s: float) -> str:
+    artifact = payload["artifact"]
+    artifact_path = Path(
+        state.get("artifact_path")
+        or str(dpath / "model" / artifact["filename"])
+    )
+    container = payload.get("container") or {}
+    image = container.get("image") or "%s:%s" % (
+        container.get("image_repository"),
+        container.get("image_tag") or "latest",
+    )
+    if not artifact_path.exists():
+        raise RuntimeError("cached artifact missing: %s" % artifact_path)
+    return _run_container(
+        payload, dpath, artifact_path,
+        image=image, cname=cname, confirm_s=confirm_s,
+    )
+
+
+def _recover_one(cfg: Dict[str, Any], dpath: Path, payload: Dict[str, Any],
+                 state: Dict[str, Any], reason: str) -> None:
+    uid = payload["deployment_uid"]
+    container = payload.get("container") or {}
+    cname = container.get("container_name") or state.get("container_name")
+    if not cname:
+        return
+    now = time.monotonic()
+    if now < _restore_fail_until.get(uid, 0):
+        return
+    running = _container_running_state(cname)
+    # Agent start must relaunch even if Docker already has a "running"
+    # leftover from a too-early start (camera up, RTSP ingest dead).
+    if running is True and reason != "boot":
+        return
+    if reason == "boot":
+        _wait_for_recover_ready(payload)
+
+    attempts = 3 if reason == "boot" else 1
+    confirm_s = 8.0 if reason == "boot" else 2.5
+    last_error = None  # type: Optional[Exception]
+    for attempt in range(1, attempts + 1):
+        try:
+            if reason == "boot":
+                log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+                    reason, cname, attempt, attempts))
+                container_id = _relaunch_from_payload(
+                    payload, dpath, state, cname, confirm_s,
+                )
+            else:
+                current = _container_running_state(cname)
+                if current is False:
+                    log("recover (%s): docker start %s (attempt %s/%s)" % (
+                        reason, cname, attempt, attempts))
+                    prepare_host_display_for_camera()
+                    result = _subprocess_run(
+                        ["docker", "start", cname], capture_output=True, text=True
+                    )
+                    if result.returncode != 0:
+                        detail = (result.stderr or result.stdout or "docker start failed").strip()
+                        raise RuntimeError(detail[:500])
+                    _confirm_container_running(cname, timeout_s=confirm_s)
+                    container_id = _command_output(
+                        ["docker", "inspect", "-f", "{{.Id}}", cname]
+                    )
+                else:
+                    log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+                        reason, cname, attempt, attempts))
+                    container_id = _relaunch_from_payload(
+                        payload, dpath, state, cname, confirm_s,
+                    )
+            _ack_recovered(
+                cfg, payload, dpath, cname=cname,
+                container_id=container_id, status="RUNNING",
+            )
+            _restore_fail_until.pop(uid, None)
+            log("recover (%s): %s is running" % (reason, cname))
+            return
+        except Exception as e:
+            last_error = e
+            log("recover (%s) attempt %s/%s failed for %s: %s" % (
+                reason, attempt, attempts, cname, e))
+            if attempt < attempts:
+                time.sleep(5)
+
+    _restore_fail_until[uid] = time.monotonic() + 60
+    log("recover (%s) giving up on %s until cooldown; %s" % (
+        reason, cname, last_error))
+
+
+def restore_desired_deployments(cfg: Dict[str, Any], reason: str = "boot") -> None:
+    """Bring back containers this agent still intends to run."""
+    if not DEPLOYMENTS_DIR.exists():
+        return
+    if not docker_running():
+        return
+    with _restore_lock:
+        for dpath in sorted(DEPLOYMENTS_DIR.iterdir()):
+            if not dpath.is_dir():
+                continue
+            payload = _load_json_if_exists(dpath / "deploy_payload.json")
+            if not payload or not payload.get("deployment_uid"):
+                continue
+            uid = payload["deployment_uid"]
+            if uid in _active_deployments:
+                continue
+            state = _load_json_if_exists(dpath / "state.json") or {}
+            if not _deployment_desired_running(state):
+                continue
+            try:
+                _recover_one(cfg, dpath, payload, state, reason)
+            except Exception as e:
+                log("recover (%s) skipped %s: %s" % (reason, uid, e))
 
 
 # ---------------------------------------------------------------------------
@@ -1140,10 +1493,35 @@ def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any],
         log(f"command handler error: {e}")
 
 
+def _command_already_applied(payload: Dict[str, Any]) -> bool:
+    request_id = payload.get("request_id")
+    uid = payload.get("deployment_uid")
+    if not request_id or not uid:
+        return False
+    state = _load_json_if_exists(deployment_dir(uid) / "state.json") or {}
+    if state.get("last_request_id") != request_id:
+        return False
+    op = payload.get("operation")
+    cname = state.get("container_name")
+    if op in {"deploy_model", "restart_deployment"}:
+        return bool(cname) and _container_running_state(cname) is True
+    if op == "stop_deployment":
+        return state.get("desired") == "stopped"
+    return False
+
+
 def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     received_mono = time.monotonic()
     op = payload.get("operation")
     request_id = payload.get("request_id", "?")
+    if request_id and request_id != "?" and request_id in _seen_request_ids:
+        log("duplicate command ignored: %s (request_id=%s)" % (op, request_id))
+        return
+    if request_id and request_id != "?":
+        _seen_request_ids.add(request_id)
+    if _command_already_applied(payload):
+        log("command already applied: %s (request_id=%s)" % (op, request_id))
+        return
     log(f"command received: {op} (request_id={request_id})")
     threading.Thread(
         target=_run_command,
@@ -1174,7 +1552,17 @@ def mqtt_loop(cfg: Dict[str, Any]) -> None:
         while True:
             time.sleep(3600)
 
-    client = mqtt.Client()
+    client_id = "icicle-agent-%s" % (device_id or "unknown")
+    mqtt_kwargs = {"client_id": client_id, "clean_session": False}
+    callback_api = getattr(mqtt, "CallbackAPIVersion", None)
+    if callback_api is not None:
+        mqtt_kwargs["callback_api_version"] = callback_api.VERSION1
+    try:
+        client = mqtt.Client(**mqtt_kwargs)
+    except TypeError:
+        mqtt_kwargs.pop("callback_api_version", None)
+        client = mqtt.Client(**mqtt_kwargs)
+    log("mqtt client_id=%s clean_session=false" % client_id)
     if mcfg.get("tls_enabled"):
         client.tls_set()
     if mcfg.get("username"):
@@ -1211,6 +1599,11 @@ def main() -> None:
     ensure_dir_permissions(STATE_DIR)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = enroll_if_needed()
+    _wait_for_docker()
+    try:
+        restore_desired_deployments(cfg, reason="boot")
+    except Exception as e:
+        log("boot recover failed: %s" % e)
     threading.Thread(target=heartbeat_loop, args=(cfg,), daemon=True).start()
     mqtt_loop(cfg)
 

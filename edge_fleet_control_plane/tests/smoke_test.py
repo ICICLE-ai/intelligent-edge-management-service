@@ -289,6 +289,16 @@ assert payload["operation"] == "deploy_model"
 assert payload["artifact"]["filename"] == "unetpp_teacher_512x768_fp16.engine"
 assert payload["container"]["container_name"] == "unetpp_infer"
 
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+pending = r.json().get("pending_commands") or []
+assert any(c.get("request_id") == cmd["request_id"] for c in pending), pending
+
 # Group deploy
 r = client.post("/deployments", data={
     "model_card_uid": "mc_seed_unetpp",
@@ -339,6 +349,75 @@ dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND devi
 assert dd and dd["status"] == "RUNNING", dict(dd or {})
 assert dd["observed_artifact_sha256"] == "aa" * 32, dict(dd)
 assert dd["provenance_status"] == "UNDECLARED", dict(dd)
+
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+assert not any(
+    c.get("request_id") == cmd["request_id"]
+    for c in (r.json().get("pending_commands") or [])
+)
+dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "DEGRADED", dict(dd or {})
+parent = fetch_one("SELECT status FROM deployments WHERE deployment_uid=?",
+                   (dep["deployment_uid"],))
+assert parent and parent["status"] == "DEGRADED", dict(parent or {})
+
+r = client.post("/api/agent/ack", json={
+    "device_id": d["device_uid"],
+    "request_id": "recover-smoke-1",
+    "deployment_uid": dep["deployment_uid"],
+    "operation": "recover_deployment",
+    "status": "RUNNING",
+    "container_id": "abcd1234",
+    "container_name": payload["container"]["container_name"],
+    "provenance": {
+        "artifact_sha256": "aa" * 32,
+        "artifact_bytes": 99712684,
+        "image": "habg21/unet-trt-infer:latest",
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image_digest": "habg21/unet-trt-infer@sha256:" + ("cc" * 32),
+        "container_id": "abcd1234",
+    },
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "RUNNING", dict(dd or {})
+parent = fetch_one("SELECT status FROM deployments WHERE deployment_uid=?",
+                   (dep["deployment_uid"],))
+assert parent and parent["status"] == "RUNNING", dict(parent or {})
+
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT status FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "DEGRADED", dict(dd or {})
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "docker_running": True,
+    "active_containers": [{
+        "name": payload["container"]["container_name"],
+        "image": "habg21/unet-trt-infer:latest",
+        "state": "running",
+        "status_text": "Up 3 seconds",
+    }],
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT status FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "RUNNING", dict(dd or {})
 
 from app.services import provenance_service  # noqa: E402
 matched, _ = provenance_service.compare(
