@@ -277,27 +277,54 @@ def _dispatch_deploy(
     """Publish deploy_model to device topic(s).
 
     Group deploys publish once per device so each container gets its own
-    ``STREAM_INGEST_URL`` (``cam-{device_uid}`` on the ingest pod).
+    ``STREAM_INGEST_URL`` (``cam-{device_uid}`` on the ingest pod). All
+    commands are recorded first, then sent over one broker connection.
     """
-    results: List[tuple[str, Optional[str], Optional[str]]] = []
     if target_type == "DEVICE":
         targets = [(target_uid, request_id)]
     else:
         targets = [(d["device_uid"], gen_request_id()) for d in target_devices]
 
+    records = []
     for device_uid, cmd_request_id in targets:
         payload = payload_builder(device_uid)
         payload["request_id"] = cmd_request_id
-        results.append(
-            _publish_command(
-                owner=owner,
-                dep={"target_type": "DEVICE", "target_uid": device_uid},
-                deployment_uid=deployment_uid,
-                operation="deploy_model",
-                request_id=cmd_request_id,
-                payload=payload,
-            )
+        topic, target_gone = _record_command(
+            owner=owner,
+            dep={"target_type": "DEVICE", "target_uid": device_uid},
+            deployment_uid=deployment_uid,
+            operation="deploy_model",
+            request_id=cmd_request_id,
+            payload=payload,
         )
+        records.append((cmd_request_id, topic, payload, target_gone))
+
+    outcome: Dict[str, tuple[str, Optional[str]]] = {
+        rid: ("RECORDED", "target device no longer exists" if gone else None)
+        for rid, _, _, gone in records
+    }
+    to_send = [(rid, topic, payload) for rid, topic, payload, gone in records if not gone]
+    if to_send and get_settings().mqtt.enabled:
+        try:
+            with mqtt_service.publisher() as pub:
+                infos = []
+                for rid, topic, payload in to_send:
+                    try:
+                        infos.append((rid, pub.send(topic, payload)))
+                    except Exception as e:
+                        outcome[rid] = _mark_failed(rid, e)
+                for rid, info in infos:
+                    try:
+                        pub.confirm(info)
+                        outcome[rid] = _mark_sent(rid)
+                    except Exception as e:
+                        outcome[rid] = _mark_failed(rid, e)
+        except Exception as e:
+            for rid, _, _ in to_send:
+                if outcome[rid][0] == "RECORDED":
+                    outcome[rid] = _mark_failed(rid, e)
+
+    results = [(*outcome[rid], topic) for rid, topic, _, _ in records]
 
     statuses = [r[0] for r in results]
     errs = [r[1] for r in results if r[1]]
@@ -345,7 +372,7 @@ def get_active_device_deployment(device_uid: str, owner: str) -> Optional[dict]:
     return None
 
 
-def _publish_command(
+def _record_command(
     *,
     owner: str,
     dep: dict,
@@ -353,14 +380,9 @@ def _publish_command(
     operation: str,
     request_id: str,
     payload: Dict[str, Any],
-) -> tuple[str, Optional[str], Optional[str]]:
-    """Record the command first, then publish via MQTT.
-
-    The agent can ACK within milliseconds of receiving MQTT — the row must
-    exist before the broker delivers the message.
-    """
+) -> tuple[str, bool]:
+    """Insert the command + audit rows. Returns (topic, target_gone)."""
     topic = mqtt_service.topic_for(dep["target_type"], dep["target_uid"])
-    settings = get_settings()
     device_uid = dep["target_uid"] if dep["target_type"] == "DEVICE" else None
     target_gone = bool(device_uid) and devices_repo.get_any(device_uid) is None
     if target_gone:
@@ -386,24 +408,51 @@ def _publish_command(
         device_uid=device_uid,
         payload=payload,
     )
-    status = "RECORDED"
-    err: Optional[str] = None
-    sent_at: Optional[str] = None
     if target_gone:
-        err = "target device no longer exists"
-        commands_repo.update_send_status(request_id, status=status, error=err)
-    elif settings.mqtt.enabled:
-        try:
-            mqtt_service.publish(topic, payload)
-            status = "MQTT_SENT"
-            sent_at = now_iso()
-            commands_repo.update_send_status(request_id, status=status, sent_at=sent_at)
-        except Exception as e:
-            log.exception("MQTT publish failed: %s", e)
-            status = "MQTT_FAILED"
-            err = str(e)
-            commands_repo.update_send_status(request_id, status=status, error=err)
-    return status, err, topic
+        commands_repo.update_send_status(
+            request_id, status="RECORDED", error="target device no longer exists"
+        )
+    return topic, target_gone
+
+
+def _mark_sent(request_id: str) -> tuple[str, Optional[str]]:
+    commands_repo.update_send_status(request_id, status="MQTT_SENT", sent_at=now_iso())
+    return "MQTT_SENT", None
+
+
+def _mark_failed(request_id: str, e: Exception) -> tuple[str, Optional[str]]:
+    log.error("MQTT publish failed for %s: %s", request_id, e)
+    commands_repo.update_send_status(request_id, status="MQTT_FAILED", error=str(e))
+    return "MQTT_FAILED", str(e)
+
+
+def _publish_command(
+    *,
+    owner: str,
+    dep: dict,
+    deployment_uid: str,
+    operation: str,
+    request_id: str,
+    payload: Dict[str, Any],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Record the command first, then publish via MQTT.
+
+    The agent can ACK within milliseconds of receiving MQTT — the row must
+    exist before the broker delivers the message.
+    """
+    topic, target_gone = _record_command(
+        owner=owner, dep=dep, deployment_uid=deployment_uid,
+        operation=operation, request_id=request_id, payload=payload,
+    )
+    if target_gone:
+        return "RECORDED", "target device no longer exists", topic
+    if not get_settings().mqtt.enabled:
+        return "RECORDED", None, topic
+    try:
+        mqtt_service.publish(topic, payload)
+    except Exception as e:
+        return (*_mark_failed(request_id, e), topic)
+    return (*_mark_sent(request_id), topic)
 
 
 # ---------------------------------------------------------------------------
