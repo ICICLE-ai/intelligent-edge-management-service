@@ -94,6 +94,21 @@ def ack(request: Request, payload: dict):
 
     if deployment_uid and device_uid:
         if op in {"deploy_model", "restart_deployment", "recover_deployment"}:
+            current = dep_repo.get_any(deployment_uid) or {}
+            if (
+                op != "restart_deployment"
+                and (current.get("status") or "").upper() in dep_repo.SETTLED_STOP_STATUSES
+            ):
+                event_service.record(
+                    "AGENT_ACK_IGNORED_STOPPED",
+                    "Ignored %s %s ack; deployment is %s" % (op, status, current.get("status")),
+                    severity="WARN",
+                    owner=(cmd or {}).get("owner_tapis_username") or current.get("owner_tapis_username"),
+                    device_uid=device_uid,
+                    deployment_uid=deployment_uid,
+                    payload=payload,
+                )
+                return {"ok": True, "ignored": "stopped"}
             mapped = {
                 "RUNNING": "RUNNING",
                 "STARTED": "RUNNING",

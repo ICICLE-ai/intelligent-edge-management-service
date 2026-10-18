@@ -19,7 +19,10 @@ A simpler model than the original v1 agent:
   Argus, and the RTSP ingest host are reachable, then relaunch from the saved
   spec (same as Restart: cached image + artifact, no re-download). A heartbeat
   only fills in if the container later dies. Stop records ``desired=stopped``
-  so a reboot does not bring that workload back.
+  so a reboot does not bring that workload back. A replayed ``deploy_model``
+  (MQTT session or heartbeat pending commands after reinstall) is ignored
+  when the portal or local state says the deployment is stopped. Restart
+  in the portal is the only way to start it again.
 * RUNNING means ``docker inspect`` still shows the container running shortly
   after ``docker run -d``, not merely that the run command returned.
 
@@ -53,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.4.1"
+AGENT_VERSION = "edge-agent-v2.4.2"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -236,11 +239,13 @@ def enroll_if_needed() -> Dict[str, Any]:
                 log("enrollment failed (%s); keeping existing device_config.json" % resp.status_code)
                 return load_json(CONFIG_PATH)
             raise RuntimeError(_explain_enroll_error(url, resp.status_code, resp.text))
-        cfg = resp.json()["device_config"]
-        api_key = resp.json().get("device_api_key")
+        body = resp.json()
+        cfg = body["device_config"]
+        api_key = body.get("device_api_key")
         save_json(CONFIG_PATH, cfg)
         if api_key:
             save_json(CREDENTIALS_PATH, {"api_key": api_key})
+        _remember_portal_deployments(body.get("device_deployments") or [])
         _safe_unlink(ENROLLMENT_PATH)
         log("enrollment successful; device_config.json written")
         return cfg
@@ -383,6 +388,7 @@ def heartbeat_loop(cfg: Dict[str, Any]) -> None:
                 "timestamp": time.time(),
             }
             body = post_json_response(url, payload, api_key=api_key) or {}
+            _remember_portal_deployments(body.get("device_deployments") or [])
             for command in body.get("pending_commands") or []:
                 if isinstance(command, dict) and command.get("operation"):
                     handle_command(cfg, command)
@@ -1493,6 +1499,20 @@ def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any],
         log(f"command handler error: {e}")
 
 
+_portal_deployment_status = {}  # type: Dict[str, str]
+_SETTLED_STOP = ("STOPPED", "STOPPING", "CANCELLED", "FAILED")
+
+
+def _remember_portal_deployments(rows: Any) -> None:
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        uid = row.get("deployment_uid")
+        status = row.get("status")
+        if uid and status:
+            _portal_deployment_status[uid] = str(status).upper()
+
+
 def _command_already_applied(payload: Dict[str, Any]) -> bool:
     request_id = payload.get("request_id")
     uid = payload.get("deployment_uid")
@@ -1510,6 +1530,19 @@ def _command_already_applied(payload: Dict[str, Any]) -> bool:
     return False
 
 
+def _stale_deploy_after_stop(payload: Dict[str, Any]) -> bool:
+    """True when a replayed Deploy would revive a Stopped workload."""
+    if payload.get("operation") != "deploy_model":
+        return False
+    uid = payload.get("deployment_uid")
+    if not uid:
+        return False
+    state = _load_json_if_exists(deployment_dir(uid) / "state.json") or {}
+    if state.get("desired") == "stopped":
+        return True
+    return _portal_deployment_status.get(uid) in _SETTLED_STOP
+
+
 def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     received_mono = time.monotonic()
     op = payload.get("operation")
@@ -1521,6 +1554,9 @@ def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
         _seen_request_ids.add(request_id)
     if _command_already_applied(payload):
         log("command already applied: %s (request_id=%s)" % (op, request_id))
+        return
+    if _stale_deploy_after_stop(payload):
+        log("stale deploy ignored; deployment is stopped (request_id=%s)" % request_id)
         return
     log(f"command received: {op} (request_id={request_id})")
     threading.Thread(

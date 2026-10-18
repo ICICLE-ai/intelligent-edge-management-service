@@ -111,6 +111,7 @@ cfg = enroll_body["device_config"]
 device_api_key = enroll_body.get("device_api_key")
 assert device_api_key and device_api_key.startswith("dkey_"), enroll_body
 assert cfg["device_id"] == d["device_uid"]
+assert enroll_body.get("device_deployments") == []
 
 agent_headers = {"Authorization": f"Bearer {device_api_key}"}
 
@@ -464,6 +465,42 @@ r = client.post("/api/agent/ack", json={
 assert r.status_code == 200, r.text
 dep_after = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_after and dep_after["status"] == "STOPPED", dict(dep_after or {})
+
+# Reinstall path: an old unacked deploy_model must not come back on heartbeat,
+# and a stale RUNNING ack must not revive the Stopped deployment.
+execute(
+    "UPDATE device_commands SET acked_at=NULL, status='MQTT_SENT' WHERE request_id=?",
+    (cmd["request_id"],),
+)
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+hb = r.json()
+assert any(
+    row.get("deployment_uid") == dep["deployment_uid"] and row.get("status") == "STOPPED"
+    for row in (hb.get("device_deployments") or [])
+), hb
+assert not any(
+    c.get("request_id") == cmd["request_id"]
+    for c in (hb.get("pending_commands") or [])
+), hb.get("pending_commands")
+r = client.post("/api/agent/ack", json={
+    "device_id": d["device_uid"],
+    "request_id": cmd["request_id"],
+    "deployment_uid": dep["deployment_uid"],
+    "operation": "deploy_model",
+    "status": "RUNNING",
+    "container_id": "stale1234",
+    "container_name": payload["container"]["container_name"],
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+assert r.json().get("ignored") == "stopped", r.json()
+dep_still_stopped = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
+assert dep_still_stopped and dep_still_stopped["status"] == "STOPPED", dict(dep_still_stopped or {})
 
 # Restart from cached artifacts
 r = client.post(f"/deployments/{dep['deployment_uid']}/restart", follow_redirects=False)

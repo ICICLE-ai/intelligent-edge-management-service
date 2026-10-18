@@ -237,6 +237,23 @@ def list_device_deployments(deployment_uid: str) -> List[dict]:
     return [dict(r) for r in rows]
 
 
+SETTLED_STOP_STATUSES = ("STOPPED", "STOPPING", "CANCELLED", "FAILED")
+
+
+def summaries_for_device(device_uid: str) -> List[dict]:
+    """Compact uid/status rows the agent uses to refuse a stale Deploy after Stop."""
+    rows = fetch_all(
+        """
+        SELECT dd.deployment_uid, dd.status
+          FROM device_deployments dd
+         WHERE dd.device_uid = ?
+         ORDER BY dd.created_at DESC
+        """,
+        (device_uid,),
+    )
+    return [{"deployment_uid": r["deployment_uid"], "status": r["status"]} for r in rows]
+
+
 def active_for_device(device_uid: str) -> List[dict]:
     rows = fetch_all(
         """

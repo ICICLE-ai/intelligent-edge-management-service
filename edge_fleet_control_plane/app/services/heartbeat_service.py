@@ -86,7 +86,12 @@ def record_heartbeat(payload: Dict[str, Any]) -> Dict[str, Any]:
         pending = commands_repo.list_unacked_payloads_for_device(device_uid)
     except Exception:
         log.exception("pending-command lookup failed for %s", device_uid)
-    return {"ok": True, "received_at": received, "pending_commands": pending}
+    return {
+        "ok": True,
+        "received_at": received,
+        "pending_commands": pending,
+        "device_deployments": dep_repo.summaries_for_device(device_uid),
+    }
 
 
 def reconcile_observed_containers(
