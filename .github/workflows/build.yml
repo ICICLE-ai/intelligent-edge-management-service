@@ -56,6 +56,15 @@ jobs:
           mkdir -p data
           python tests/smoke_test.py
 
+      - name: Run compatibility test
+        env:
+          ALLOW_LOCALHOST_INSTALLER: "true"
+          APP_BASE_URL: http://testserver
+          MQTT_ENABLED: "false"
+          LOCAL_DEV_AUTH: "true"
+          LOCAL_DEV_USERNAME: compat_user
+        run: python tests/compatibility_test.py
+
   manifests:
     name: Check manifests and scripts
     runs-on: ubuntu-latest

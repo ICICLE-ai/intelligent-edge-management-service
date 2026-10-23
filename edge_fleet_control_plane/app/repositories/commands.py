@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from app.core.time import now_iso
 from app.db.session import execute, fetch_all, fetch_one
+from app.repositories.deployments import SETTLED_STOP_STATUSES, summaries_for_device
 
 
 def insert(*, command_uid: str, owner: str, deployment_uid: Optional[str], target_type: str,
@@ -116,3 +117,70 @@ def mark_acked(request_id: str, response: dict) -> None:
 def get_latest_open_for_deployment(deployment_uid: str, operation: str) -> Optional[dict]:
     """Backward-compatible alias — returns latest command row for the operation."""
     return get_latest_for_deployment(deployment_uid, operation)
+
+
+_PENDING_COMMAND_STATUSES = ("RECORDED", "MQTT_SENT", "MQTT_FAILED")
+_PENDING_OPERATIONS = (
+    "deploy_model",
+    "stop_deployment",
+    "restart_deployment",
+    "stream_start",
+    "stream_stop",
+)
+
+
+def list_unacked_payloads_for_device(device_uid: str, limit: int = 20) -> List[dict]:
+    """MQTT payloads the agent never acked — delivered again on heartbeat.
+
+    A later command on the same deployment (Stop, Restart, or a newer Deploy)
+    supersedes an older one. ``deploy_model`` is also dropped when the
+    deployment is already STOPPED so a reinstall cannot revive it.
+    """
+    placeholders = ",".join("?" for _ in _PENDING_COMMAND_STATUSES)
+    op_placeholders = ",".join("?" for _ in _PENDING_OPERATIONS)
+    rows = fetch_all(
+        """
+        SELECT payload_json, created_at, deployment_uid, operation FROM device_commands
+         WHERE (device_uid = ? OR (target_type = 'DEVICE' AND target_uid = ?))
+           AND acked_at IS NULL
+           AND status IN (%s)
+           AND operation IN (%s)
+         ORDER BY created_at ASC
+        """ % (placeholders, op_placeholders),
+        (device_uid, device_uid) + _PENDING_COMMAND_STATUSES + _PENDING_OPERATIONS,
+    )
+    latest_rows = fetch_all(
+        """
+        SELECT deployment_uid, MAX(created_at) AS latest_at
+          FROM device_commands
+         WHERE (device_uid = ? OR (target_type = 'DEVICE' AND target_uid = ?))
+           AND deployment_uid IS NOT NULL
+           AND operation IN (%s)
+         GROUP BY deployment_uid
+        """ % op_placeholders,
+        (device_uid, device_uid) + _PENDING_OPERATIONS,
+    )
+    latest_at = {r["deployment_uid"]: r["latest_at"] for r in latest_rows}
+    status_by_uid = {
+        row["deployment_uid"]: (row.get("status") or "").upper()
+        for row in summaries_for_device(device_uid)
+    }
+    out: List[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or not payload.get("operation"):
+            continue
+        uid = payload.get("deployment_uid") or row["deployment_uid"]
+        op = payload.get("operation") or row["operation"]
+        created = row["created_at"]
+        if uid and latest_at.get(uid) and created < latest_at[uid]:
+            continue
+        if op == "deploy_model" and status_by_uid.get(uid) in SETTLED_STOP_STATUSES:
+            continue
+        out.append(payload)
+        if len(out) >= limit:
+            break
+    return out

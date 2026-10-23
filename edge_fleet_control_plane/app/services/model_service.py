@@ -12,10 +12,12 @@ import json
 import re
 from typing import List, Optional
 
+from app.config import get_settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.core.ids import gen_uid
 from app.repositories import generations as gen_repo
 from app.repositories import model_cards as mc_repo
+from app.repositories import users as users_repo
 from app.services import event_service
 from app.services.docker_parser import (
     MODEL_HOST_TEMPLATE,
@@ -34,6 +36,8 @@ _VALID_MOUNT_MODES = {None, "", "ro", "rw"}
 _VALID_PORT_PROTO = {"tcp", "udp"}
 _VALID_NETWORK_MODES = {None, "", "bridge", "host", "none"}
 _VALID_SOURCE_TYPES = {"patra", "url"}
+_VALID_PRECISIONS = {"fp32", "fp16", "int8"}
+_VERSION_RE = re.compile(r"^\d+(\.\d+)*$")
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PATRA_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
@@ -100,9 +104,27 @@ def is_owner(owner: str, card: dict) -> bool:
     return card.get("owner_tapis_username") == owner
 
 
+def is_admin_username(username: str) -> bool:
+    settings = get_settings()
+    if settings.local_dev_auth and username == settings.local_dev_username:
+        return True
+    row = users_repo.get(username) or {}
+    return (row.get("role") or "") == "admin"
+
+
+def can_manage(username: str, card: dict) -> bool:
+    """Owner or admin (seeded system cards have no human owner)."""
+    return is_owner(username, card) or is_admin_username(username)
+
+
 def require_owner(owner: str, card: dict) -> None:
     if not is_owner(owner, card):
         raise ForbiddenError("You don't own this app.")
+
+
+def require_manage(owner: str, card: dict) -> None:
+    if not can_manage(owner, card):
+        raise ForbiddenError("You don't have permission to change this app.")
 
 
 def get_full_for_user(owner: str, model_card_uid: str) -> dict:
@@ -114,7 +136,7 @@ def get_full_for_user(owner: str, model_card_uid: str) -> dict:
 
 def get_full_for_owner(owner: str, model_card_uid: str) -> dict:
     card = get_full(model_card_uid)
-    require_owner(owner, card)
+    require_manage(owner, card)
     return card
 
 
@@ -185,6 +207,7 @@ def build_payload_from_form(form: dict) -> dict:
         "size_bytes": _to_int(form.get("artifact_size_bytes")),
         "sha256": (form.get("artifact_sha256") or "").strip() or None,
         "notes": (form.get("artifact_notes") or "").strip() or None,
+        **{f: (form.get(f"artifact_{f}") or "").strip() or None for f in mc_repo.ENGINE_FIELDS},
     }
 
     env_keys = get_list("env_key")
@@ -386,7 +409,7 @@ def update_from_payload(owner: str, model_card_uid: str, payload: dict) -> dict:
     existing = mc_repo.get(model_card_uid)
     if not existing:
         raise NotFoundError("App not found")
-    require_owner(owner, existing)
+    require_manage(owner, existing)
     _validate_payload(payload, slug_required=False)
     existing_full = mc_repo.get_full(model_card_uid) or {}
     existing_artifact = existing_full.get("artifact") or {}
@@ -426,7 +449,7 @@ def set_status(owner: str, model_card_uid: str, status: str) -> None:
     card = mc_repo.get(model_card_uid)
     if not card:
         raise NotFoundError("App not found")
-    require_owner(owner, card)
+    require_manage(owner, card)
     if status not in _VALID_STATUSES:
         raise ValidationError(f"Invalid status {status}")
     mc_repo.set_status(model_card_uid, status)
@@ -486,6 +509,13 @@ def _validate_payload(p: dict, *, slug_required: bool = False) -> None:
         errors.append("Patra source requires a Patra model-card UUID.")
     if a.get("source_type") == "url" and not a.get("download_url"):
         errors.append("URL source requires a download_url.")
+    precision = a.get("engine_precision")
+    if precision and precision.lower() not in _VALID_PRECISIONS:
+        errors.append(f"Engine precision must be one of {sorted(_VALID_PRECISIONS)}.")
+    for field in ("engine_compute_capability", "engine_tensorrt_version", "engine_l4t_version"):
+        value = a.get(field)
+        if value and not _VERSION_RE.match(str(value)):
+            errors.append(f"{field} must be a dotted version such as 8.7 or 8.5.2.")
     patra_uuid = p.get("patra_model_card_uuid")
     if patra_uuid and not _PATRA_UUID_RE.match(patra_uuid):
         errors.append("Patra model card UUID must be a valid v4 UUID.")

@@ -223,6 +223,25 @@
           <input class="input mono" name="artifact_sha256" value="{{ val('artifact_sha256') }}">
         </div>
       </div>
+      <p class="tiny text-mute">Engine build target. A TensorRT engine only loads on the GPU and TensorRT release it was built with; leave blank for portable artifacts (e.g. PyTorch weights).</p>
+      <div class="field-grid field-grid--3">
+        <div class="field">
+          <label class="field__label">GPU compute capability</label>
+          <input class="input mono" name="artifact_engine_compute_capability" placeholder="8.7" value="{{ val('artifact_engine_compute_capability') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">TensorRT version</label>
+          <input class="input mono" name="artifact_engine_tensorrt_version" placeholder="8.5.2" value="{{ val('artifact_engine_tensorrt_version') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">L4T (JetPack) release</label>
+          <input class="input mono" name="artifact_engine_l4t_version" placeholder="35.4" value="{{ val('artifact_engine_l4t_version') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Precision</label>
+          <input class="input mono" name="artifact_engine_precision" placeholder="fp16" value="{{ val('artifact_engine_precision') }}">
+        </div>
+      </div>
       <div class="field">
         <label class="field__label">Notes</label>
         <textarea class="textarea" name="artifact_notes" rows="2">{{ val('artifact_notes') }}</textarea>

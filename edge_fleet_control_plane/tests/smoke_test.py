@@ -111,6 +111,7 @@ cfg = enroll_body["device_config"]
 device_api_key = enroll_body.get("device_api_key")
 assert device_api_key and device_api_key.startswith("dkey_"), enroll_body
 assert cfg["device_id"] == d["device_uid"]
+assert enroll_body.get("device_deployments") == []
 
 agent_headers = {"Authorization": f"Bearer {device_api_key}"}
 
@@ -129,8 +130,14 @@ r = client.post("/api/agent/heartbeat", json={
     "cpu_percent": 17.5,
     "memory_used_mb": 2048,
     "active_containers": [],
+    "platform": {"machine": "aarch64", "gpu_compute_capability": "8.7",
+                 "l4t_version": "36.4.7", "tensorrt_version": "10.3.0.30",
+                 "memory_mb": 7620, "disk_free_gb": 40.0, "nvidia_runtime": True},
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
+reported = fetch_one("SELECT platform_json, platform_reported_at FROM devices WHERE device_uid=?",
+                     (d["device_uid"],))
+assert reported["platform_reported_at"] and json.loads(reported["platform_json"])["l4t_version"] == "36.4.7"
 
 # --------------------------------------------------------------------------- #
 # Publish a fresh app via the web form
@@ -283,6 +290,16 @@ assert payload["operation"] == "deploy_model"
 assert payload["artifact"]["filename"] == "unetpp_teacher_512x768_fp16.engine"
 assert payload["container"]["container_name"] == "unetpp_infer"
 
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+pending = r.json().get("pending_commands") or []
+assert any(c.get("request_id") == cmd["request_id"] for c in pending), pending
+
 # Group deploy
 r = client.post("/deployments", data={
     "model_card_uid": "mc_seed_unetpp",
@@ -294,6 +311,21 @@ assert r.status_code in (303, 307), r.text
 # --------------------------------------------------------------------------- #
 # Agent ACK back -> device-level row updated, deployment marked RUNNING       #
 # --------------------------------------------------------------------------- #
+deploy_timings = {"agent_version": "edge-agent-v2.1.0", "queue_s": 0.001,
+                  "artifact_cached": False, "resolve_s": 0.2}
+for phase, more in (("DOWNLOADING", {}), ("PULLING", {"download_s": 4.0}),
+                    ("STARTING", {"pull_s": 30.0, "image_cached": False})):
+    deploy_timings.update(more)
+    r = client.post("/api/agent/ack", json={
+        "device_id": d["device_uid"],
+        "request_id": cmd["request_id"],
+        "deployment_uid": dep["deployment_uid"],
+        "operation": "deploy_model",
+        "status": phase,
+        "timings": deploy_timings,
+    }, headers=agent_headers)
+    assert r.status_code == 200, r.text
+deploy_timings.update({"run_s": 1.5, "total_s": 35.8})
 r = client.post("/api/agent/ack", json={
     "device_id": d["device_uid"],
     "request_id": cmd["request_id"],
@@ -302,11 +334,115 @@ r = client.post("/api/agent/ack", json={
     "status": "RUNNING",
     "container_id": "abcd1234",
     "container_name": payload["container"]["container_name"],
+    "timings": deploy_timings,
+    "provenance": {
+        "artifact_sha256": "aa" * 32,
+        "artifact_bytes": 99712684,
+        "image": "habg21/unet-trt-infer:latest",
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image_digest": "habg21/unet-trt-infer@sha256:" + ("cc" * 32),
+        "container_id": "abcd1234",
+    },
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
                (dep["deployment_uid"], d["device_uid"]))
 assert dd and dd["status"] == "RUNNING", dict(dd or {})
+assert dd["observed_artifact_sha256"] == "aa" * 32, dict(dd)
+assert dd["provenance_status"] == "UNDECLARED", dict(dd)
+
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+assert not any(
+    c.get("request_id") == cmd["request_id"]
+    for c in (r.json().get("pending_commands") or [])
+)
+dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "DEGRADED", dict(dd or {})
+parent = fetch_one("SELECT status FROM deployments WHERE deployment_uid=?",
+                   (dep["deployment_uid"],))
+assert parent and parent["status"] == "DEGRADED", dict(parent or {})
+
+r = client.post("/api/agent/ack", json={
+    "device_id": d["device_uid"],
+    "request_id": "recover-smoke-1",
+    "deployment_uid": dep["deployment_uid"],
+    "operation": "recover_deployment",
+    "status": "RUNNING",
+    "container_id": "abcd1234",
+    "container_name": payload["container"]["container_name"],
+    "provenance": {
+        "artifact_sha256": "aa" * 32,
+        "artifact_bytes": 99712684,
+        "image": "habg21/unet-trt-infer:latest",
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image_digest": "habg21/unet-trt-infer@sha256:" + ("cc" * 32),
+        "container_id": "abcd1234",
+    },
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT * FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "RUNNING", dict(dd or {})
+parent = fetch_one("SELECT status FROM deployments WHERE deployment_uid=?",
+                   (dep["deployment_uid"],))
+assert parent and parent["status"] == "RUNNING", dict(parent or {})
+
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT status FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "DEGRADED", dict(dd or {})
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "docker_running": True,
+    "active_containers": [{
+        "name": payload["container"]["container_name"],
+        "image": "habg21/unet-trt-infer:latest",
+        "state": "running",
+        "status_text": "Up 3 seconds",
+    }],
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+dd = fetch_one("SELECT status FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "RUNNING", dict(dd or {})
+
+from app.services import provenance_service  # noqa: E402
+matched, _ = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="AA" * 32,
+    declared_digest="sha256:" + ("cc" * 32), observed_digest=("cc" * 32),
+)
+assert matched == "MATCHED", matched
+repo_digest = "habg21/unet-trt-infer-live@sha256:" + ("cc" * 32)
+matched_repo, _ = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="aa" * 32,
+    declared_digest="sha256:" + ("cc" * 32), observed_digest=repo_digest,
+)
+assert matched_repo == "MATCHED", matched_repo
+drifted, reasons = provenance_service.compare(
+    declared_sha256="aa" * 32, observed_sha256="dd" * 32,
+)
+assert drifted == "DRIFT" and reasons, (drifted, reasons)
+
+r = client.post(f"/devices/{d['device_uid']}/delete", follow_redirects=False)
+assert r.status_code in (303, 307), r.text
+assert fetch_one("SELECT 1 FROM devices WHERE device_uid=?", (d["device_uid"],)), (
+    "must not delete a device with a RUNNING deployment"
+)
+assert "notice=" in (r.headers.get("location") or "")
 
 # Soft stop — keeps image and artifacts on device
 r = client.post(f"/deployments/{dep['deployment_uid']}/stop", follow_redirects=False)
@@ -330,6 +466,42 @@ assert r.status_code == 200, r.text
 dep_after = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_after and dep_after["status"] == "STOPPED", dict(dep_after or {})
 
+# Reinstall path: an old unacked deploy_model must not come back on heartbeat,
+# and a stale RUNNING ack must not revive the Stopped deployment.
+execute(
+    "UPDATE device_commands SET acked_at=NULL, status='MQTT_SENT' WHERE request_id=?",
+    (cmd["request_id"],),
+)
+r = client.post("/api/agent/heartbeat", json={
+    "device_id": d["device_uid"],
+    "status": "ONLINE",
+    "active_containers": [],
+    "docker_running": True,
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+hb = r.json()
+assert any(
+    row.get("deployment_uid") == dep["deployment_uid"] and row.get("status") == "STOPPED"
+    for row in (hb.get("device_deployments") or [])
+), hb
+assert not any(
+    c.get("request_id") == cmd["request_id"]
+    for c in (hb.get("pending_commands") or [])
+), hb.get("pending_commands")
+r = client.post("/api/agent/ack", json={
+    "device_id": d["device_uid"],
+    "request_id": cmd["request_id"],
+    "deployment_uid": dep["deployment_uid"],
+    "operation": "deploy_model",
+    "status": "RUNNING",
+    "container_id": "stale1234",
+    "container_name": payload["container"]["container_name"],
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+assert r.json().get("ignored") == "stopped", r.json()
+dep_still_stopped = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
+assert dep_still_stopped and dep_still_stopped["status"] == "STOPPED", dict(dep_still_stopped or {})
+
 # Restart from cached artifacts
 r = client.post(f"/deployments/{dep['deployment_uid']}/restart", follow_redirects=False)
 assert r.status_code in (303, 307), r.text
@@ -347,10 +519,27 @@ r = client.post("/api/agent/ack", json={
     "status": "RUNNING",
     "container_id": "abcd1234",
     "container_name": payload["container"]["container_name"],
+    "timings": {"queue_s": 0.001, "artifact_cached": True, "pull_s": 0.05,
+                "image_cached": True, "run_s": 1.2, "total_s": 1.3},
 }, headers=agent_headers)
 assert r.status_code == 200, r.text
 dep_running = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_running and dep_running["status"] == "RUNNING", dict(dep_running or {})
+
+# Evaluation export: per-phase timings from command rows + ack events
+sys.path.insert(0, str(ROOT / "eval"))
+from export_deployment_timings import build_rows  # noqa: E402
+
+timing_rows = {(r["request_id"], r["operation"]): r for r in build_rows()
+               if r["deployment_uid"] == dep["deployment_uid"]}
+cold = timing_rows[(cmd["request_id"], "deploy_model")]
+assert cold["final_status"] == "RUNNING", cold
+assert cold["ack_downloading_at"] and cold["ack_pulling_at"] and cold["ack_starting_at"], cold
+assert cold["agent_download_s"] == 4.0 and cold["agent_image_cached"] is False, cold
+assert cold["end_to_end_s"] is not None and cold["generation_uid"], cold
+warm = timing_rows[(restart_cmd["request_id"], "restart_deployment")]
+assert warm["agent_artifact_cached"] is True and warm["agent_total_s"] == 1.3, warm
+assert warm["ack_downloading_at"] is None, warm
 
 # Purge — full cleanup
 r = client.post(f"/deployments/{dep['deployment_uid']}/stop", data={"purge": "on"}, follow_redirects=False)
@@ -466,6 +655,25 @@ assert updated and "Updated" in updated["display_name"], dict(updated or {})
 r = client.post(f"/devices/{d['device_uid']}/delete", follow_redirects=False)
 assert r.status_code in (303, 307), f"delete device failed: {r.status_code} {r.text[:400]}"
 assert not fetch_one("SELECT 1 FROM devices WHERE device_uid=?", (d["device_uid"],))
+settled = fetch_one(
+    "SELECT status FROM deployments WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+assert settled and settled["status"] == "CANCELLED", dict(settled or {})
+
+# Orphan: parent deployment remains after the device row is gone. Delete must
+# settle it locally (no purge command) instead of FK-500.
+execute(
+    "UPDATE deployments SET status='PENDING' WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+r = client.post(f"/deployments/{dep['deployment_uid']}/delete", follow_redirects=False)
+assert r.status_code in (303, 307), f"delete orphan deployment: {r.status_code} {r.text[:400]}"
+orphan = fetch_one(
+    "SELECT status FROM deployments WHERE deployment_uid=?",
+    (dep["deployment_uid"],),
+)
+assert orphan and orphan["status"] == "CANCELLED", dict(orphan or {})
 
 # --------------------------------------------------------------------------- #
 # Pages render                                                                 #

@@ -192,11 +192,11 @@ class AppSettings:
         return bool(self.database_url)
 
     def assert_reachable_base_url(self) -> None:
-        """Refuse to mint installers that point at localhost from a Jetson."""
+        """Refuse to mint installers that point at localhost or the test host."""
         if self.allow_localhost_installer:
             return
         url = self.base_url_clean.lower()
-        for bad in ("localhost", "127.0.0.1", "0.0.0.0"):
+        for bad in ("localhost", "127.0.0.1", "0.0.0.0", "testserver"):
             if bad in url:
                 raise ValueError(
                     "APP_BASE_URL is not reachable by edge devices. "

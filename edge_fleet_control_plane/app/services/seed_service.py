@@ -100,13 +100,19 @@ def _seed_models() -> None:
 
 
 def _refresh_seed_artifact(r: dict[str, Any]) -> None:
-    """Fill Patra UUID / download URL on already-seeded cards when seed JSON is updated."""
+    """Fill Patra UUID / download URL / engine target on already-seeded cards when seed JSON is updated."""
     artifact = r.get("artifact") or {}
+    uid = r["model_card_uid"]
+    for field in mc_repo.ENGINE_FIELDS:
+        if artifact.get(field):
+            execute(
+                f"UPDATE model_artifacts SET {field} = ? WHERE model_card_uid = ?",
+                (artifact[field], uid),
+            )
     patra = r.get("patra_model_card_uuid") or artifact.get("patra_model_card_uuid")
     download = artifact.get("download_url")
     if not patra and not download:
         return
-    uid = r["model_card_uid"]
     if patra:
         execute(
             "UPDATE model_cards SET patra_model_card_uuid = ? WHERE model_card_uid = ?",

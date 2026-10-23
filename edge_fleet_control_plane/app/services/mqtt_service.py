@@ -2,10 +2,11 @@
 
 Implementation details:
 * TLS is on by default, plain TCP is allowed for self-hosted brokers.
-* We open a connection per publish for now. The control plane publishes
-  infrequently (one message per fleet command) so this is a reasonable tradeoff
-  for simplicity. A long-lived client can be introduced later behind the same
-  function signature.
+* ``publish`` opens a connection for a single message.
+* ``publisher()`` opens one connection for a batch. Group deploys send one
+  message per device; reconnecting (TLS handshake + login) for each cost
+  ~1.4 s per device against the Tapis broker, so batches share a connection
+  and wait for all PUBACKs together.
 """
 
 from __future__ import annotations
@@ -13,7 +14,8 @@ from __future__ import annotations
 import json
 import socket
 import uuid
-from typing import Any, Dict
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator
 
 from app.config import get_settings
 from app.core.logging import get_logger
@@ -38,7 +40,24 @@ def topic_for(target_type: str, target_uid: str) -> str:
     raise ValueError(f"Unknown target_type {target_type}")
 
 
-def publish(topic: str, payload: Dict[str, Any], qos: int = 1) -> None:
+class Publisher:
+    """One open broker connection. ``send`` queues, ``confirm`` waits for the PUBACK."""
+
+    def __init__(self, client: "mqtt.Client") -> None:
+        self._client = client
+
+    def send(self, topic: str, payload: Dict[str, Any], qos: int = 1):
+        return self._client.publish(topic, json.dumps(payload), qos=qos)
+
+    @staticmethod
+    def confirm(info, timeout: float = 10) -> None:
+        info.wait_for_publish(timeout=timeout)
+        if not info.is_published():
+            raise RuntimeError(f"MQTT publish not acknowledged within {timeout:g}s")
+
+
+@contextmanager
+def publisher() -> Iterator[Publisher]:
     if mqtt is None:
         raise RuntimeError("paho-mqtt is not installed")
     settings = get_settings()
@@ -57,10 +76,13 @@ def publish(topic: str, payload: Dict[str, Any], qos: int = 1) -> None:
         raise RuntimeError(f"MQTT connect failed: {e}") from e
     client.loop_start()
     try:
-        info = client.publish(topic, json.dumps(payload), qos=qos)
-        info.wait_for_publish(timeout=10)
-        if info.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError(f"MQTT publish failed (rc={info.rc})")
+        yield Publisher(client)
     finally:
-        client.loop_stop()
+        # disconnect() first wakes the network thread; loop_stop() alone waits out its 1 s select.
         client.disconnect()
+        client.loop_stop()
+
+
+def publish(topic: str, payload: Dict[str, Any], qos: int = 1) -> None:
+    with publisher() as pub:
+        pub.confirm(pub.send(topic, payload, qos))

@@ -124,7 +124,8 @@ def count_for_owner(owner: str) -> dict:
     by_status = {r["status"]: r["c"] for r in rows}
     return {
         "total": sum(by_status.values()),
-        "active": by_status.get("RUNNING", 0) + by_status.get("DELIVERING", 0) + by_status.get("PENDING", 0),
+        "active": by_status.get("RUNNING", 0) + by_status.get("DEGRADED", 0)
+        + by_status.get("DELIVERING", 0) + by_status.get("PENDING", 0),
         "stopped": by_status.get("STOPPED", 0),
         "failed": by_status.get("FAILED", 0),
         "by_status": by_status,
@@ -181,6 +182,47 @@ def update_device_deployment_status(deployment_uid: str, device_uid: str, *, sta
     )
 
 
+def update_observed_provenance(
+    deployment_uid: str,
+    device_uid: str,
+    *,
+    artifact_sha256: Optional[str] = None,
+    artifact_bytes: Optional[int] = None,
+    image_id: Optional[str] = None,
+    image_digest: Optional[str] = None,
+    image: Optional[str] = None,
+    status: Optional[str] = None,
+    detail: Optional[str] = None,
+) -> None:
+    ts = now_iso()
+    execute(
+        """
+        UPDATE device_deployments
+           SET observed_artifact_sha256 = ?,
+               observed_artifact_bytes = ?,
+               observed_image_id = ?,
+               observed_image_digest = ?,
+               observed_image = ?,
+               provenance_status = ?,
+               provenance_detail = ?,
+               updated_at = ?
+         WHERE deployment_uid = ? AND device_uid = ?
+        """,
+        (
+            artifact_sha256,
+            artifact_bytes,
+            image_id,
+            image_digest,
+            image,
+            status,
+            detail,
+            ts,
+            deployment_uid,
+            device_uid,
+        ),
+    )
+
+
 def list_device_deployments(deployment_uid: str) -> List[dict]:
     rows = fetch_all(
         """
@@ -193,6 +235,23 @@ def list_device_deployments(deployment_uid: str) -> List[dict]:
         (deployment_uid,),
     )
     return [dict(r) for r in rows]
+
+
+SETTLED_STOP_STATUSES = ("STOPPED", "STOPPING", "CANCELLED", "FAILED")
+
+
+def summaries_for_device(device_uid: str) -> List[dict]:
+    """Compact uid/status rows the agent uses to refuse a stale Deploy after Stop."""
+    rows = fetch_all(
+        """
+        SELECT dd.deployment_uid, dd.status
+          FROM device_deployments dd
+         WHERE dd.device_uid = ?
+         ORDER BY dd.created_at DESC
+        """,
+        (device_uid,),
+    )
+    return [{"deployment_uid": r["deployment_uid"], "status": r["status"]} for r in rows]
 
 
 def active_for_device(device_uid: str) -> List[dict]:

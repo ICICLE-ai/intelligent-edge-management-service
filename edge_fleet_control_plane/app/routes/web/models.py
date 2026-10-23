@@ -172,6 +172,7 @@ def app_detail(request: Request, model_card_uid: str):
             "active_nav": "apps",
             "card": card,
             "is_owner": model_service.is_owner(owner, card),
+            "can_manage": model_service.can_manage(owner, card),
         },
     )
 
@@ -305,6 +306,10 @@ def _card_to_form(card: dict) -> dict:
         "artifact_size_bytes": artifact.get("size_bytes"),
         "artifact_sha256": artifact.get("sha256"),
         "artifact_notes": artifact.get("notes"),
+        "artifact_engine_compute_capability": artifact.get("engine_compute_capability"),
+        "artifact_engine_tensorrt_version": artifact.get("engine_tensorrt_version"),
+        "artifact_engine_l4t_version": artifact.get("engine_l4t_version"),
+        "artifact_engine_precision": artifact.get("engine_precision"),
         "spec_image_registry": spec.get("image_registry"),
         "spec_image_repository": spec.get("image_repository"),
         "spec_image_tag": spec.get("image_tag"),
