@@ -11,7 +11,11 @@ after a short grace period. Does not go through MQTT or the portal.
   python3 manual_orin_baseline.py --mode warm \\
       --engine /opt/icicle-edge/deployments/<uid>/model/unetpp_teacher_512x768_fp16.engine
 
-Cold: docker rmi (if present) + docker pull + docker run.
+  # New use case: fetch the engine with curl from the same URL the agent uses
+  # (journalctl -u icicle-edge-agent | grep downloading), then pull and run:
+  python3 manual_orin_baseline.py --mode cold --engine-url https://.../unetpp_teacher_512x768_fp16.engine
+
+Cold: [curl engine] + docker rmi (if present) + docker pull + docker run.
 Warm: docker rm -f + docker run, no pull (IEMS Restart).
 
 Prints one CSV line to stdout. Append to a file:
@@ -30,6 +34,7 @@ from io import StringIO
 
 DEFAULT_IMAGE = "habg21/unet-trt-infer-live:latest"
 DEFAULT_NAME = "unetpp_infer_live_baseline"
+ENGINE_NAME = "unetpp_teacher_512x768_fp16.engine"
 CONFIRM_S = 2.5
 
 
@@ -68,14 +73,30 @@ def main():
     parser.add_argument("--mode", choices=("cold", "warm"), required=True)
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--name", default=DEFAULT_NAME)
-    parser.add_argument("--engine", required=True, help="Host path to the .engine file")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--engine", help="Host path to an .engine file already on disk")
+    source.add_argument("--engine-url", help="Download the engine with curl into a fresh directory (timed)")
+    parser.add_argument("--engine-name", default=ENGINE_NAME)
+    parser.add_argument("--download-root", default="/tmp/manual_baseline")
     parser.add_argument(
         "--ingest",
         default="",
         help="Optional STREAM_INGEST_URL (omit if you only care about inspect Running)",
     )
     args = parser.parse_args()
-    engine = os.path.abspath(args.engine)
+
+    download_s = None
+    if args.engine_url:
+        model_dir = os.path.join(args.download_root, time.strftime("%Y%m%d_%H%M%S"))
+        os.makedirs(model_dir)
+        engine = os.path.join(model_dir, args.engine_name)
+        began = time.monotonic()
+        fetched = run(["curl", "-fsSL", "-o", engine, args.engine_url])
+        download_s = round(time.monotonic() - began, 4)
+        if fetched.returncode != 0:
+            sys.exit("curl download failed")
+    else:
+        engine = os.path.abspath(args.engine)
     if not os.path.isfile(engine):
         sys.exit("engine not found: %s" % engine)
     model_dir = os.path.dirname(engine)
@@ -105,7 +126,7 @@ def main():
         "--network", "host", "--ipc", "host", "--privileged",
         "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
         "-e", "SHOW_WINDOW=0",
-        "-e", "ENGINE_PATH=/workspace/models/unetpp_teacher_512x768_fp16.engine",
+        "-e", "ENGINE_PATH=/workspace/models/%s" % os.path.basename(engine),
         "-e", "DETECT_EVERY_N_FRAMES=4",
         "-e", "STREAM_FPS=8",
         "-e", "STREAM_WIDTH=960",
@@ -123,13 +144,14 @@ def main():
         sys.exit((started.stderr or started.stdout or "docker run failed").strip()[:500])
     confirm_running(args.name)
     run_s = round(time.monotonic() - began, 4)
-    total_s = round((pull_s or 0.0) + run_s, 4)
+    total_s = round((download_s or 0.0) + (pull_s or 0.0) + run_s, 4)
 
     row = {
         "mode": args.mode,
         "path": "manual_docker",
         "image": args.image,
         "engine": engine,
+        "download_s": download_s if download_s is not None else "",
         "pull_s": pull_s if pull_s is not None else "",
         "run_s": run_s,
         "total_s": total_s,
