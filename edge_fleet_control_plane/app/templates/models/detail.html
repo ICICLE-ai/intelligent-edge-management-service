@@ -21,6 +21,9 @@
       {% if card.patra_model_card_uuid %}
         · Patra <span data-copy="{{ card.patra_model_card_uuid }}" class="mono small copy-link">{{ card.patra_model_card_uuid }}</span>
       {% endif %}
+      {% if 'runtime-model-url' in (card.tags or []) %}
+        · deployers supply their own model URL
+      {% endif %}
       {% if card.task_type %} · {{ card.task_type }}{% endif %}
       {% if card.framework %} · {{ card.framework }}{% endif %}
       {% if card.license %} · {{ card.license }}{% endif %}

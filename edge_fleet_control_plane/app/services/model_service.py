@@ -36,6 +36,9 @@ _VALID_MOUNT_MODES = {None, "", "ro", "rw"}
 _VALID_PORT_PROTO = {"tcp", "udp"}
 _VALID_NETWORK_MODES = {None, "", "bridge", "host", "none"}
 _VALID_SOURCE_TYPES = {"patra", "url"}
+# Apps with this tag ask the person deploying for a weights URL. The portal
+# puts that URL on the deploy command instead of the card's artifact.
+RUNTIME_MODEL_URL_TAG = "runtime-model-url"
 _VALID_PRECISIONS = {"fp32", "fp16", "int8"}
 _VERSION_RE = re.compile(r"^\d+(\.\d+)*$")
 
@@ -140,6 +143,24 @@ def get_full_for_owner(owner: str, model_card_uid: str) -> dict:
     return card
 
 
+def accepts_runtime_model_url(card: dict) -> bool:
+    """True when deployers must supply their own weights URL."""
+    tags = card.get("tags")
+    if not isinstance(tags, list):
+        raw = card.get("tags_json") or ""
+        return f'"{RUNTIME_MODEL_URL_TAG}"' in raw
+    return RUNTIME_MODEL_URL_TAG in {str(t).strip().lower() for t in tags}
+
+
+def _annotate_runtime_model_url(rows: List[dict]) -> List[dict]:
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["accepts_runtime_model_url"] = accepts_runtime_model_url(item)
+        out.append(item)
+    return out
+
+
 def can_deploy(owner: str, card: dict) -> bool:
     if card.get("status") != "PUBLISHED":
         return False
@@ -153,8 +174,12 @@ def deployable_for_device(owner: str, device: dict) -> dict:
         return {"mine": [], "others": []}
     gen = device["generation_uid"]
     return {
-        "mine": mc_repo.models_compatible_with_generation_for_owner(gen, owner),
-        "others": mc_repo.models_compatible_with_generation_public(gen, owner),
+        "mine": _annotate_runtime_model_url(
+            mc_repo.models_compatible_with_generation_for_owner(gen, owner)
+        ),
+        "others": _annotate_runtime_model_url(
+            mc_repo.models_compatible_with_generation_public(gen, owner)
+        ),
     }
 
 
@@ -163,8 +188,12 @@ def deployable_for_group_devices(owner: str, group_devices: List[dict]) -> dict:
     if not gens:
         return {"mine": [], "others": []}
     return {
-        "mine": mc_repo.models_compatible_with_devices_for_owner(gens, owner),
-        "others": mc_repo.models_compatible_with_devices_public(gens, owner),
+        "mine": _annotate_runtime_model_url(
+            mc_repo.models_compatible_with_devices_for_owner(gens, owner)
+        ),
+        "others": _annotate_runtime_model_url(
+            mc_repo.models_compatible_with_devices_public(gens, owner)
+        ),
     }
 
 
@@ -304,6 +333,10 @@ def build_payload_from_form(form: dict) -> dict:
         })
 
     tags = [t.strip() for t in (form.get("tags") or "").split(",") if t.strip()]
+    if form.get("allow_runtime_model_url_present"):
+        tags = [t for t in tags if t.lower() != RUNTIME_MODEL_URL_TAG]
+        if _checkbox(form.get("allow_runtime_model_url")):
+            tags.append(RUNTIME_MODEL_URL_TAG)
 
     patra_uuid = (form.get("patra_model_card_uuid") or form.get("artifact_patra_uuid") or "").strip() or None
 

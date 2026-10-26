@@ -1,0 +1,11 @@
+{% set _runtime_first = (my_apps[0] if my_apps else (other_apps[0] if other_apps else none)) %}
+{% set _runtime_open = _runtime_first and _runtime_first.accepts_runtime_model_url %}
+<div class="field" data-runtime-model-url style="grid-column: 1 / -1;{% if not _runtime_open %}display:none;{% endif %}">
+  <label class="field__label">Your model URL</label>
+  <input class="input mono" type="url" name="model_download_url"
+         placeholder="https://icicleai.tapis.io/v3/files/postits/redeem/…"
+         {% if not _runtime_open %}disabled{% endif %}>
+  <div class="field__hint">
+    Direct download link. The device fetches this URL as-is and saves it under the app's model path.
+  </div>
+</div>

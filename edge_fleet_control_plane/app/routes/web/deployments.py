@@ -61,6 +61,7 @@ def create_deployment(
     target_type: str = Form(...),
     target_uid: str = Form(...),
     notes: str = Form(""),
+    model_download_url: str = Form(""),
     redirect_to: str = Form(""),
 ):
     owner = current_username(request)
@@ -71,6 +72,7 @@ def create_deployment(
             target_type=target_type,
             target_uid=target_uid,
             notes=notes or None,
+            runtime_model_url=model_download_url or None,
         )
     except DomainError as e:
         return form_error(e, redirect_to)

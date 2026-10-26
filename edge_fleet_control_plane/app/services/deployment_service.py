@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from app.config import get_settings
 from app.core.errors import ConflictError, DomainError, NotFoundError, ValidationError
@@ -58,6 +59,21 @@ def _resolve_patra_download_url(patra_uuid: str) -> Optional[str]:
     return f"{base}/modelcard/{patra_uuid}/download_url"
 
 
+def _apply_runtime_model_url(payload: Dict[str, Any], url: str) -> None:
+    """Download the deployer's URL into the filename already on the app.
+
+    Links such as Tapis postit redeem URLs carry no filename. The agent saves
+    the response at the card's artifact path and the container keeps MODEL_PATH.
+    """
+    artifact = payload["artifact"]
+    artifact["source_type"] = "url"
+    artifact["download_url"] = url
+    artifact["patra_model_card_uuid"] = None
+    artifact["patra_resolve_url"] = None
+    artifact["sha256"] = None
+    artifact["size_bytes"] = None
+
+
 def build_deploy_payload(
     *,
     deployment_uid: str,
@@ -65,6 +81,7 @@ def build_deploy_payload(
     card: dict,
     device_uid: Optional[str] = None,
     device: Optional[dict] = None,
+    runtime_model_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Assemble the self-contained deploy_model MQTT payload from a card aggregate."""
     artifact = card["artifact"]
@@ -144,6 +161,8 @@ def build_deploy_payload(
             ],
         },
     }
+    if runtime_model_url:
+        _apply_runtime_model_url(payload, runtime_model_url)
     return payload
 
 
@@ -460,7 +479,7 @@ def _publish_command(
 # ---------------------------------------------------------------------------
 
 def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str,
-           notes: Optional[str] = None) -> dict:
+           notes: Optional[str] = None, runtime_model_url: Optional[str] = None) -> dict:
     target_type = target_type.upper()
     if target_type not in {"DEVICE", "GROUP"}:
         raise ValidationError("target_type must be DEVICE or GROUP.")
@@ -476,6 +495,15 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
     from app.services import model_service
     if not model_service.can_deploy(owner, card):
         raise ValidationError("You don't have permission to deploy this app.")
+
+    runtime_model_url = (runtime_model_url or "").strip() or None
+    if model_service.accepts_runtime_model_url(card):
+        if not runtime_model_url:
+            raise ValidationError("This app requires a model download URL.")
+        if urlparse(runtime_model_url).scheme not in {"http", "https"}:
+            raise ValidationError("Model URL must start with http:// or https://.")
+    else:
+        runtime_model_url = None
 
     target_devices, target_name = _resolve_target(owner, target_type, target_uid)
     if not target_devices:
@@ -496,6 +524,7 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
         target_name=target_name,
         request_id=request_id,
         notes=notes,
+        runtime_model_url=runtime_model_url,
     )
     for d in target_devices:
         dep_repo.create_device_deployment(
@@ -518,6 +547,7 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
             card=card,
             device_uid=device_uid,
             device=devices_repo.get_any(device_uid),
+            runtime_model_url=runtime_model_url,
         ),
     )
     if status == "MQTT_SENT":
@@ -565,6 +595,7 @@ def redispatch(*, owner: str, deployment_uid: str) -> dict:
         raise ValidationError("Model card is missing artifact or container spec.")
 
     request_id = gen_request_id()
+    runtime_model_url = (dep.get("runtime_model_url") or "").strip() or None
     target_devices, _ = _resolve_target(owner, dep["target_type"], dep["target_uid"])
     _assert_compatibility(card, target_devices)
     status, err, topic = _dispatch_deploy(
@@ -581,6 +612,7 @@ def redispatch(*, owner: str, deployment_uid: str) -> dict:
             card=card,
             device_uid=device_uid,
             device=devices_repo.get_any(device_uid),
+            runtime_model_url=runtime_model_url,
         ),
     )
     if status == "MQTT_SENT":

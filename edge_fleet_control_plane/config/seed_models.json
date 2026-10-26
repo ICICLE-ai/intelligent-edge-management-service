@@ -291,5 +291,61 @@
     "compatibility": [
       {"generation_uid": "jetson-agx-xavier-jp4-v1", "min_memory_mb": 8192, "min_storage_gb": 8, "requires_cuda": true, "notes": "Engine must be built on this JP4 Xavier (TRT 7, opset 11). MVS SDK required on host at /opt/MVS. ~100 ms/frame at 1920 on Volta, so raise DETECT_EVERY_N_FRAMES beyond 2 cameras."}
     ]
+  },
+  {
+    "model_card_uid": "mc_seed_yolo_ultralytics_csi_live",
+    "app_id": "app_seed_yolo_ultralytics_csi_live",
+    "visibility": "public",
+    "slug": "yolo-ultralytics-csi-live",
+    "display_name": "YOLO Ultralytics CSI (Live Stream)",
+    "version": "1.0.0",
+    "task_type": "detection or segmentation",
+    "framework": "ultralytics",
+    "description": "Ultralytics YOLO live stream on CSI cameras. The weights file chooses detection or segmentation. At deploy time the operator pastes a download URL (including a Tapis postit). The device saves that file as model.pt and runs it. JetPack 6 / Orin.",
+    "license": "Apache-2.0",
+    "homepage_url": "https://github.com/ultralytics/ultralytics",
+    "tags": ["agriculture", "yolo", "ultralytics", "live-stream", "csi", "multi-camera", "runtime-model-url"],
+    "status": "PUBLISHED",
+    "raw_docker_command": "docker run -d --name yolo_ultralytics_csi_live --runtime nvidia --gpus all --network host --ipc host --privileged -e NVIDIA_DRIVER_CAPABILITIES=all -e SHOW_WINDOW=0 -e MODEL_PATH=/workspace/models/model.pt -e DETECT_EVERY_N_FRAMES=2 -e STREAM_FPS=10 -e STREAM_WIDTH=960 -e STREAM_HEIGHT=540 --mount type=bind,source=/tmp/argus_socket,target=/tmp/argus_socket -v /opt/models/yolo:/workspace/models:ro habg21/yolo-ultralytics-csi-live:latest\n\n# Deployers paste their own weights URL. The agent downloads it to model.pt.\n# Multi-CSI: the portal injects CAMERA_INDICES and STREAM_INGEST_URL_0..N.",
+    "artifact": {
+      "filename": "model.pt",
+      "container_path": "/workspace/models/model.pt",
+      "source_type": "url",
+      "content_type": "application/octet-stream"
+    },
+    "container": {
+      "image_repository": "habg21/yolo-ultralytics-csi-live",
+      "image_tag": "latest",
+      "container_name": "yolo_ultralytics_csi_live",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": false,
+      "model_env_var": "MODEL_PATH",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "ipc_mode": "host",
+      "privileged": true,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "SHOW_WINDOW": "0",
+        "MODEL_PATH": "/workspace/models/model.pt",
+        "CONFIDENCE": "0.25",
+        "IOU": "0.45",
+        "DETECT_EVERY_N_FRAMES": "2",
+        "STREAM_FPS": "10",
+        "STREAM_WIDTH": "960",
+        "STREAM_HEIGHT": "540",
+        "DISPLAY_WIDTH": "960",
+        "QT_QPA_PLATFORM": "offscreen"
+      },
+      "mounts": [
+        {"style": "mount", "type": "bind", "source": "/tmp/argus_socket", "target": "/tmp/argus_socket"},
+        {"style": "volume", "type": "bind", "source": "${DEPLOYMENT_DIR}/model", "target": "/workspace/models", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "jetson-orin-nano-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Paste a model URL at deploy time. Saved as model.pt. JetPack 6 image."}
+    ]
   }
 ]

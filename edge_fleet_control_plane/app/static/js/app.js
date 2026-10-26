@@ -191,6 +191,27 @@
     refresh();
   }
 
+  // ---------------------------------------------------------------------------
+  // Deploy form: show the weights URL only for apps that ask for one.
+  // ---------------------------------------------------------------------------
+  function setupRuntimeModelUrl() {
+    document.querySelectorAll('form[action="/deployments"]').forEach((form) => {
+      const select = form.querySelector('select[name="model_card_uid"]');
+      const field = form.querySelector("[data-runtime-model-url]");
+      const input = form.querySelector('input[name="model_download_url"]');
+      if (!select || !field || !input) return;
+      function refresh() {
+        const opt = select.options[select.selectedIndex];
+        const on = !!(opt && opt.dataset.runtimeModelUrl === "1");
+        field.style.display = on ? "" : "none";
+        input.disabled = !on;
+        input.required = on;
+      }
+      select.addEventListener("change", refresh);
+      refresh();
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     setupSidebar();
     setupFormLoading();
@@ -200,6 +221,7 @@
     setupCopy();
     setupTargetSwitcher();
     setupArtifactSource();
+    setupRuntimeModelUrl();
     setupDeviceTiles();
   });
 })();

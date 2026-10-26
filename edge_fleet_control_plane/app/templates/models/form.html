@@ -167,6 +167,17 @@
       <input class="input" name="tags" placeholder="agriculture, tensorrt, fp16" value="{{ val('tags') }}">
       <div class="field__hint">Comma separated.</div>
     </div>
+    <div class="field">
+      <input type="hidden" name="allow_runtime_model_url_present" value="1">
+      <label class="checkbox">
+        <input type="checkbox" name="allow_runtime_model_url" value="on" {% if form.get('allow_runtime_model_url') %}checked{% endif %}>
+        Ask for a model URL at deploy time
+      </label>
+      <div class="field__hint">
+        Whoever launches this app pastes a download link. The device fetches that URL and saves
+        the file at this app's model path. The link does not need to contain a filename.
+      </div>
+    </div>
   </fieldset>
 
   <!-- ============================================================

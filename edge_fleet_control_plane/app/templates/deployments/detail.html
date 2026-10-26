@@ -136,6 +136,9 @@
         <dt>Container name</dt><dd class="mono">{{ d.card.spec.container_name }}</dd>
         <dt>Artifact</dt><dd class="mono">{{ d.card.artifact.filename }} → {{ d.card.artifact.container_path }}</dd>
         <dt>Source</dt><dd>{{ d.card.artifact.source_type }}{% if d.card.artifact.patra_model_card_uuid %} · {{ d.card.artifact.patra_model_card_uuid }}{% endif %}</dd>
+        {% if d.runtime_model_url %}
+          <dt>Deployed model URL</dt><dd class="mono small">{{ d.runtime_model_url }}</dd>
+        {% endif %}
       </dl>
     {% endif %}
   </div>

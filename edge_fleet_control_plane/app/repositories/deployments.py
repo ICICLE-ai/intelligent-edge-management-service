@@ -28,18 +28,19 @@ SELECT d.*,
 
 def create(*, deployment_uid: str, owner: str, model_card_uid: str, artifact_uid: str,
            spec_uid: str, target_type: str, target_uid: str, target_name: Optional[str],
-           request_id: str, notes: Optional[str] = None) -> None:
+           request_id: str, notes: Optional[str] = None,
+           runtime_model_url: Optional[str] = None) -> None:
     ts = now_iso()
     execute(
         """
         INSERT INTO deployments
             (deployment_uid, owner_tapis_username, model_card_uid, artifact_uid,
              spec_uid, target_type, target_uid, target_name, status, request_id,
-             notes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+             notes, runtime_model_url, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
         """,
         (deployment_uid, owner, model_card_uid, artifact_uid, spec_uid, target_type,
-         target_uid, target_name, request_id, notes, ts, ts),
+         target_uid, target_name, request_id, notes, runtime_model_url, ts, ts),
     )
 
 

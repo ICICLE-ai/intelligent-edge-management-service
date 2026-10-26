@@ -293,6 +293,9 @@ def _card_to_form(card: dict) -> dict:
         "license": card.get("license"),
         "homepage_url": card.get("homepage_url"),
         "tags": ", ".join(card.get("tags") or []),
+        "allow_runtime_model_url": (
+            "on" if model_service.RUNTIME_MODEL_URL_TAG in {t.lower() for t in (card.get("tags") or [])} else ""
+        ),
         "status": card.get("status"),
         "visibility": card.get("visibility") or "private",
         "patra_model_card_uuid": card.get("patra_model_card_uuid") or artifact.get("patra_model_card_uuid"),

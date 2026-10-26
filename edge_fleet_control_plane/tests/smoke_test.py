@@ -290,6 +290,53 @@ assert payload["operation"] == "deploy_model"
 assert payload["artifact"]["filename"] == "unetpp_teacher_512x768_fp16.engine"
 assert payload["container"]["container_name"] == "unetpp_infer"
 
+# An app that asks for a model URL must put the deployer's link on the command.
+url_form = dict(form)
+url_form["display_name"] = "Bring Your Own Weights"
+url_form["version"] = "0.3.0"
+url_form["spec_container_name"] = "byo_weights"
+url_form["allow_runtime_model_url_present"] = "1"
+url_form["allow_runtime_model_url"] = "on"
+url_form["spec_model_env_var"] = "MODEL_PATH"
+url_form["env_key"] = ["MODEL_PATH"]
+url_form["env_value"] = ["/models/smoke.onnx"]
+r = client.post("/apps", data=url_form, follow_redirects=False)
+assert r.status_code in (303, 307), r.text
+byo = fetch_one("SELECT model_card_uid, tags_json FROM model_cards WHERE display_name='Bring Your Own Weights'")
+assert byo and "runtime-model-url" in (byo["tags_json"] or ""), dict(byo or {})
+r = client.post("/deployments", data={
+    "model_card_uid": byo["model_card_uid"],
+    "target_type": "DEVICE",
+    "target_uid": d["device_uid"],
+}, follow_redirects=False)
+assert r.status_code == 422, r.text
+r = client.post("/deployments", data={
+    "model_card_uid": byo["model_card_uid"],
+    "target_type": "DEVICE",
+    "target_uid": d["device_uid"],
+    "model_download_url": "https://icicleai.tapis.io/v3/files/postits/redeem/68351162-09b9-432d-880d-0e3ffdd5c2bd-010?download=true",
+}, follow_redirects=False)
+assert r.status_code in (303, 307), r.text
+byo_dep = fetch_one(
+    "SELECT * FROM deployments WHERE model_card_uid=? ORDER BY created_at DESC",
+    (byo["model_card_uid"],),
+)
+assert byo_dep["runtime_model_url"].endswith("?download=true"), dict(byo_dep)
+byo_cmd = fetch_one(
+    "SELECT payload_json FROM device_commands WHERE deployment_uid=? AND operation='deploy_model'",
+    (byo_dep["deployment_uid"],),
+)
+byo_payload = json.loads(byo_cmd["payload_json"])
+assert byo_payload["artifact"]["source_type"] == "url", byo_payload["artifact"]
+assert byo_payload["artifact"]["download_url"].endswith("?download=true")
+assert byo_payload["artifact"]["filename"] == "smoke.onnx"
+assert byo_payload["artifact"]["container_path"] == "/models/smoke.onnx"
+assert byo_payload["artifact"]["sha256"] is None
+model_env = [
+    e for e in byo_payload["runtime"]["environment"] if e["key"] == "MODEL_PATH"
+]
+assert model_env and model_env[0]["value"] == "/models/smoke.onnx", byo_payload["runtime"]["environment"]
+
 r = client.post("/api/agent/heartbeat", json={
     "device_id": d["device_uid"],
     "status": "ONLINE",
