@@ -631,6 +631,21 @@ pre {
   display: flex; flex-wrap: wrap; gap: 4px;
   color: var(--text-mute); font-size: 12.5px; margin-top: 4px;
 }
+.compat-reqs { display: grid; gap: 10px; margin-top: 12px; }
+.compat-req {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-elev); padding: 10px 12px;
+}
+.compat-req__name { font-weight: 600; font-size: 13.5px; margin-bottom: 8px; }
+.compat-req__grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px; align-items: end;
+}
+.compat-req__grid label { display: grid; gap: 4px; font-size: 12px; color: var(--text-mute); }
+.compat-req__cuda {
+  display: flex !important; align-items: center; gap: 6px;
+  grid-auto-flow: column; justify-content: start; padding-bottom: 8px;
+}
 .device-tile:hover { border-color: var(--brand-400); }
 .device-tile.is-checked,
 .device-tile:has(input:checked) {

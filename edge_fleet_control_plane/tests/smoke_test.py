@@ -573,6 +573,25 @@ assert r.status_code == 200, r.text
 dep_running = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_running and dep_running["status"] == "RUNNING", dict(dep_running or {})
 
+# Late acks from commands the Restart superseded must not touch the deployment.
+for late in (
+    {"request_id": cmd["request_id"], "operation": "deploy_model", "status": "FAILED",
+     "error": "late failure from the original deploy"},
+    {"request_id": stop_cmd["request_id"], "operation": "stop_deployment", "status": "STOPPED"},
+):
+    r = client.post("/api/agent/ack", json={
+        "device_id": d["device_uid"],
+        "deployment_uid": dep["deployment_uid"],
+        **late,
+    }, headers=agent_headers)
+    assert r.status_code == 200, r.text
+    assert r.json().get("ignored") == "superseded", (late, r.json())
+dep_running = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
+assert dep_running and dep_running["status"] == "RUNNING", dict(dep_running or {})
+dd = fetch_one("SELECT status FROM device_deployments WHERE deployment_uid=? AND device_uid=?",
+               (dep["deployment_uid"], d["device_uid"]))
+assert dd and dd["status"] == "RUNNING", dict(dd or {})
+
 # Evaluation export: per-phase timings from command rows + ack events
 sys.path.insert(0, str(ROOT / "eval"))
 from export_deployment_timings import build_rows  # noqa: E402

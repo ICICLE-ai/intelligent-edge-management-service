@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.4.2"
+AGENT_VERSION = "edge-agent-v2.5.1"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -93,7 +93,10 @@ def load_json(path: Path) -> Dict[str, Any]:
 def save_json(path: Path, obj: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(obj, indent=2))
+    with tmp.open("w") as handle:
+        handle.write(json.dumps(obj, indent=2))
+        handle.flush()
+        os.fsync(handle.fileno())
     tmp.replace(path)
 
 
@@ -280,6 +283,15 @@ def load_api_key() -> Optional[str]:
 # Platform facts used by the control plane's deploy-time compatibility check
 # ---------------------------------------------------------------------------
 
+# Tegra SoC (from /proc/device-tree/compatible) -> CUDA compute capability.
+# Preferred over the model name: JetPack 4 AGX Xavier reports its model as "Jetson-AGX".
+_TEGRA_COMPUTE_CAPABILITY = (
+    ("tegra234", "8.7"),
+    ("tegra194", "7.2"),
+    ("tegra186", "6.2"),
+    ("tegra210", "5.3"),
+)
+
 # Jetson module name (from the device tree) -> CUDA compute capability.
 _JETSON_COMPUTE_CAPABILITY = (
     ("orin", "8.7"),
@@ -329,6 +341,10 @@ def _detect_tensorrt_version() -> Optional[str]:
 
 
 def _detect_compute_capability(jetson_model: Optional[str]) -> Optional[str]:
+    compatible = (_read_text("/proc/device-tree/compatible") or "").lower()
+    for chip, capability in _TEGRA_COMPUTE_CAPABILITY:
+        if chip in compatible:
+            return capability
     if jetson_model:
         lowered = jetson_model.lower()
         for needle, capability in _JETSON_COMPUTE_CAPABILITY:
@@ -745,16 +761,37 @@ def sha256_file(path: Path) -> Optional[str]:
         return None
 
 
+def _image_repository(image: str) -> str:
+    name = (image or "").split("@", 1)[0]
+    head, sep, tail = name.rpartition(":")
+    return head if sep and "/" not in tail else name
+
+
+def _repo_digest_for_image_id(image_id: str, image: str) -> Optional[str]:
+    """Registry digest of the image the container runs, not of whatever the tag points to now."""
+    raw = _command_output(["docker", "image", "inspect", "-f", "{{json .RepoDigests}}", image_id])
+    try:
+        digests = [d for d in json.loads(raw or "[]") if isinstance(d, str) and "@sha256:" in d]
+    except ValueError:
+        return None
+    repo = _image_repository(image)
+    for digest in digests:
+        if digest.split("@", 1)[0] == repo:
+            return digest
+    return digests[0] if digests else None
+
+
 def inspect_image_provenance(image: str, container_id: Optional[str]) -> Dict[str, Optional[str]]:
     image_id = None
+    source = None
     if container_id:
         image_id = _command_output(["docker", "inspect", "-f", "{{.Image}}", container_id])
+        source = "container" if image_id else None
     if not image_id and image:
         image_id = _command_output(["docker", "inspect", "-f", "{{.Id}}", image])
-    digest = _command_output(["docker", "inspect", "-f", "{{index .RepoDigests 0}}", image]) if image else None
-    if digest in ("", "<no value>", "<none>"):
-        digest = None
-    return {"image_id": image_id, "image_digest": digest, "image": image}
+        source = "tag" if image_id else None
+    digest = _repo_digest_for_image_id(image_id, image) if image_id else None
+    return {"image_id": image_id, "image_digest": digest, "image": image, "image_id_source": source}
 
 
 def collect_provenance(payload: Dict[str, Any], artifact_path: Path, *,

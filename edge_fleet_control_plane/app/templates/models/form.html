@@ -90,7 +90,39 @@
           <div class="text-mute small">No generations are seeded yet. Add one under Hardware.</div>
         {% endfor %}
       </div>
-      <div class="field__hint">Pick every Jetson generation this model is compatible with. The portal blocks deployments to incompatible devices.</div>
+      <div class="field__hint">Pick every device generation this app can run on. For each one, set the minimum RAM and free disk the portal should require. Leave a minimum blank to skip that check.</div>
+      <div class="compat-reqs">
+        {% for g in generations %}
+          {% set saved = (compat_by_uid or {}).get(g.generation_uid) %}
+          {% set chosen = g.generation_uid in selected_compat %}
+          <div class="compat-req" data-compat-for="{{ g.generation_uid }}" {% if not chosen %}hidden{% endif %}>
+            <div class="compat-req__name">{{ g.display_name }}</div>
+            <div class="compat-req__grid">
+              <label>Min memory (MB)
+                <input class="input" type="number" min="0" name="compat_min_memory_mb"
+                       value="{{ saved.min_memory_mb if saved and saved.min_memory_mb else '' }}"
+                       {% if not chosen %}disabled{% endif %}>
+              </label>
+              <label>Min free disk (GB)
+                <input class="input" type="number" min="0" name="compat_min_storage_gb"
+                       value="{{ saved.min_storage_gb if saved and saved.min_storage_gb else '' }}"
+                       {% if not chosen %}disabled{% endif %}>
+              </label>
+              <label class="compat-req__cuda">
+                <input type="checkbox" name="compat_requires_cuda" value="{{ g.generation_uid }}"
+                       {% if not saved or saved.requires_cuda %}checked{% endif %}
+                       {% if not chosen %}disabled{% endif %}>
+                CUDA required
+              </label>
+              <label>Notes
+                <input class="input" type="text" name="compat_notes"
+                       value="{{ saved.notes if saved and saved.notes else '' }}"
+                       {% if not chosen %}disabled{% endif %}>
+              </label>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
     </div>
 
     <div class="field">

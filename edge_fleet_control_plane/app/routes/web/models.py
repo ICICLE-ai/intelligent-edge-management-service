@@ -100,6 +100,7 @@ def new_app(request: Request):
             "generations": gen_repo.list_active(),
             "errors": [],
             "form": {},
+            "compat_by_uid": {},
         },
     )
 
@@ -124,6 +125,7 @@ async def create_app(request: Request):
                 "generations": gen_repo.list_active(),
                 "errors": str(e).split("; "),
                 "form": form_dict,
+                "compat_by_uid": _compat_by_uid(form_dict),
             },
             status_code=422,
         )
@@ -195,6 +197,7 @@ def edit_app(request: Request, model_card_uid: str):
             "generations": gen_repo.list_active(),
             "errors": [],
             "form": _card_to_form(card),
+            "compat_by_uid": _compat_by_uid(_card_to_form(card)),
         },
     )
 
@@ -219,6 +222,7 @@ async def update_app(request: Request, model_card_uid: str):
                 "generations": gen_repo.list_active(),
                 "errors": str(e).split("; "),
                 "form": form_dict,
+                "compat_by_uid": _compat_by_uid(form_dict),
             },
             status_code=422,
         )
@@ -268,6 +272,34 @@ def delete_app(request: Request, model_card_uid: str):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _as_list(form: dict, key: str) -> list:
+    value = form.get(key)
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _compat_by_uid(form: dict) -> dict:
+    """Saved compatibility row per generation, for the edit form."""
+    saved = form.get("compat_by_uid")
+    if isinstance(saved, dict) and saved:
+        return saved
+    uids = _as_list(form, "compat_generation_uid")
+    memories = _as_list(form, "compat_min_memory_mb")
+    disks = _as_list(form, "compat_min_storage_gb")
+    notes = _as_list(form, "compat_notes")
+    cuda = set(_as_list(form, "compat_requires_cuda"))
+    rows = {}
+    for index, uid in enumerate(uids):
+        rows[uid] = {
+            "min_memory_mb": memories[index] if index < len(memories) else "",
+            "min_storage_gb": disks[index] if index < len(disks) else "",
+            "requires_cuda": uid in cuda or str(index) in cuda,
+            "notes": notes[index] if index < len(notes) else "",
+        }
+    return rows
+
 
 def _form_to_dict(form) -> dict:
     """Convert FastAPI's FormData into a dict that preserves repeated keys as lists."""
@@ -342,5 +374,6 @@ def _card_to_form(card: dict) -> dict:
         "port_container": [p["container_port"] for p in (spec.get("ports") or [])],
         "port_protocol": [p.get("protocol") or "tcp" for p in (spec.get("ports") or [])],
         "compat_generation_uid": [c["generation_uid"] for c in (card.get("compatibility") or [])],
+        "compat_by_uid": {c["generation_uid"]: c for c in (card.get("compatibility") or [])},
     }
     return form

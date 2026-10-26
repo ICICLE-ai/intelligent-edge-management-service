@@ -151,7 +151,13 @@
     document.querySelectorAll(".device-tile").forEach((tile) => {
       const input = tile.querySelector('input[type="checkbox"]');
       if (!input) return;
-      const sync = () => tile.classList.toggle("is-checked", input.checked);
+      const sync = () => {
+        tile.classList.toggle("is-checked", input.checked);
+        const req = document.querySelector('[data-compat-for="' + input.value + '"]');
+        if (!req) return;
+        req.hidden = !input.checked;
+        req.querySelectorAll("input").forEach((el) => { el.disabled = !input.checked; });
+      };
       input.addEventListener("change", sync);
       sync();
     });

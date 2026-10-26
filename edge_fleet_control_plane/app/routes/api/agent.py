@@ -92,6 +92,25 @@ def ack(request: Request, payload: dict):
     status = (payload.get("status") or "").upper()
     error = payload.get("error")
 
+    superseded_by = None
+    if cmd and deployment_uid and device_uid and op != "recover_deployment":
+        latest = commands_repo.get_latest_lifecycle_for_device(deployment_uid, device_uid)
+        if latest and latest["request_id"] != cmd["request_id"]:
+            superseded_by = latest
+
+    def ignore_superseded() -> dict:
+        event_service.record(
+            "AGENT_ACK_IGNORED_SUPERSEDED",
+            "Ignored %s %s ack for %s; newer %s %s was sent"
+            % (op, status, request_id, superseded_by["operation"], superseded_by["request_id"]),
+            severity="WARN",
+            owner=(cmd or {}).get("owner_tapis_username"),
+            device_uid=device_uid,
+            deployment_uid=deployment_uid,
+            payload=payload,
+        )
+        return {"ok": True, "ignored": "superseded"}
+
     if deployment_uid and device_uid:
         if op in {"deploy_model", "restart_deployment", "recover_deployment"}:
             current = dep_repo.get_any(deployment_uid) or {}
@@ -109,6 +128,8 @@ def ack(request: Request, payload: dict):
                     payload=payload,
                 )
                 return {"ok": True, "ignored": "stopped"}
+            if superseded_by:
+                return ignore_superseded()
             mapped = {
                 "RUNNING": "RUNNING",
                 "STARTED": "RUNNING",
@@ -152,6 +173,8 @@ def ack(request: Request, payload: dict):
             elif mapped == "FAILED":
                 dep_repo.update_status(deployment_uid, "FAILED")
         elif op == "stop_deployment":
+            if superseded_by:
+                return ignore_superseded()
             mapped = "STOPPED" if status in {"STOPPED", "OK", "SUCCESS"} else "FAILED" if status == "FAILED" else status
             dep_repo.update_device_deployment_status(
                 deployment_uid, device_uid, status=mapped, error=error

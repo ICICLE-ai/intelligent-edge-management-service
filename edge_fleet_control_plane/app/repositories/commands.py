@@ -100,6 +100,24 @@ def get_latest_for_deployment(deployment_uid: str, operation: str) -> Optional[d
     return dict(row) if row else None
 
 
+_LIFECYCLE_OPERATIONS = ("deploy_model", "stop_deployment", "restart_deployment")
+
+
+def get_latest_lifecycle_for_device(deployment_uid: str, device_uid: str) -> Optional[dict]:
+    """Newest Deploy/Stop/Restart sent to ``device_uid`` for this deployment."""
+    row = fetch_one(
+        """
+        SELECT * FROM device_commands
+         WHERE deployment_uid = ?
+           AND (device_uid = ? OR (target_type = 'DEVICE' AND target_uid = ?))
+           AND operation IN (?, ?, ?)
+         ORDER BY created_at DESC LIMIT 1
+        """,
+        (deployment_uid, device_uid, device_uid) + _LIFECYCLE_OPERATIONS,
+    )
+    return dict(row) if row else None
+
+
 def mark_acked(request_id: str, response: dict) -> None:
     agent_status = (response.get("status") or "").upper()
     terminal = agent_status in {"RUNNING", "STOPPED", "FAILED", "OK", "SUCCESS"}

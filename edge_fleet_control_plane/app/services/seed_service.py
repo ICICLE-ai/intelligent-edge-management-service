@@ -15,11 +15,16 @@ from app.repositories import users as user_repo
 
 log = get_logger("seed")
 
+# Seeded catalog cards belong to this Tapis account, so their owner can edit
+# the compatibility minimums the portal enforces.
+CATALOG_OWNER = "habg21"
+
 
 def seed_everything() -> None:
     from app.config import get_settings
     settings = get_settings()
     user_repo.ensure("system", display_name="System", role="admin")
+    user_repo.ensure(CATALOG_OWNER, display_name=CATALOG_OWNER, role="operator")
     if settings.local_dev_auth:
         user_repo.ensure(settings.local_dev_username, display_name=settings.local_dev_username, role="admin")
         user_repo.set_role(settings.local_dev_username, "admin")
@@ -79,7 +84,7 @@ def _seed_models() -> None:
         mc_repo.create_full(
             model_card_uid=r["model_card_uid"],
             app_id=r.get("app_id") or gen_uid("app"),
-            owner="system",
+            owner=CATALOG_OWNER,
             slug=r["slug"],
             display_name=r["display_name"],
             version=r["version"],
@@ -103,6 +108,14 @@ def _refresh_seed_artifact(r: dict[str, Any]) -> None:
     """Fill Patra UUID / download URL / engine target on already-seeded cards when seed JSON is updated."""
     artifact = r.get("artifact") or {}
     uid = r["model_card_uid"]
+    execute(
+        """
+        UPDATE model_cards
+           SET owner_tapis_username = ?
+         WHERE model_card_uid = ? AND owner_tapis_username = 'system'
+        """,
+        (CATALOG_OWNER, uid),
+    )
     for field in mc_repo.ENGINE_FIELDS:
         if artifact.get(field):
             execute(
