@@ -11,9 +11,9 @@
   function badgeClass(value) {
     if (!value) return "badge--neutral";
     const v = String(value).toUpperCase();
-    const GREEN = new Set(["ONLINE", "RUNNING", "ACK", "SUCCEEDED", "PUBLISHED", "DELIVERED", "ACTIVE"]);
-    const YELLOW = new Set(["PENDING", "DELIVERING", "RECORDED", "MQTT_SENT", "STOPPING", "INSTALLER_READY", "REGISTERED", "ENROLLED", "DRAFT", "DOWNLOADING", "PULLING", "STARTING"]);
-    const RED = new Set(["OFFLINE", "FAILED", "ERROR", "MQTT_FAILED", "DEPRECATED", "CANCELLED"]);
+    const GREEN = new Set(["ONLINE", "RUNNING", "ACK", "SUCCEEDED", "PUBLISHED", "DELIVERED", "ACTIVE", "MATCHED"]);
+    const YELLOW = new Set(["PENDING", "DELIVERING", "RECORDED", "MQTT_SENT", "STOPPING", "INSTALLER_READY", "REGISTERED", "ENROLLED", "DRAFT", "DOWNLOADING", "PULLING", "STARTING", "UNDECLARED", "UNKNOWN", "DEGRADED", "PARTIAL", "UNVERIFIED"]);
+    const RED = new Set(["OFFLINE", "FAILED", "ERROR", "MQTT_FAILED", "DEPRECATED", "CANCELLED", "DRIFT", "INVALID"]);
     const GREY = new Set(["STOPPED", "REGISTERED_NOT_INSTALLED", "INACTIVE"]);
     if (GREEN.has(v)) return "badge--green";
     if (YELLOW.has(v)) return "badge--yellow";
@@ -134,6 +134,10 @@
           if (err) err.textContent = row.error_message || "";
           const updated = tr.querySelector("[data-poll-device-updated]");
           if (updated) updated.textContent = relativeTime(row.updated_at);
+          const prov = tr.querySelector("[data-poll-device-provenance]");
+          if (prov && row.provenance_status) {
+            setBadge(prov.querySelector(".badge") || prov, row.provenance_status);
+          }
         });
 
         const streamRoot = document.getElementById("inference-streams");

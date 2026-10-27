@@ -63,13 +63,18 @@
   function setupToasts() {
     const params = new URLSearchParams(window.location.search);
     const msg = params.get("notice");
-    const level = params.get("level") || "success";
+    let level = params.get("level") || "success";
     if (!msg) return;
+    if (level === "error") level = "danger";
     const el = document.createElement("div");
     el.className = "toast toast--" + level;
-    el.textContent = msg.replace(/_/g, " ");
+    el.textContent = msg;
+    el.setAttribute("role", "alert");
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 4200);
+    const linger = (level === "danger" || level === "warn") ? 16000 : 4200;
+    const hide = () => el.remove();
+    el.addEventListener("click", hide);
+    setTimeout(hide, linger);
   }
 
   // ---------------------------------------------------------------------------
@@ -146,7 +151,13 @@
     document.querySelectorAll(".device-tile").forEach((tile) => {
       const input = tile.querySelector('input[type="checkbox"]');
       if (!input) return;
-      const sync = () => tile.classList.toggle("is-checked", input.checked);
+      const sync = () => {
+        tile.classList.toggle("is-checked", input.checked);
+        const req = document.querySelector('[data-compat-for="' + input.value + '"]');
+        if (!req) return;
+        req.hidden = !input.checked;
+        req.querySelectorAll("input").forEach((el) => { el.disabled = !input.checked; });
+      };
       input.addEventListener("change", sync);
       sync();
     });
@@ -186,6 +197,27 @@
     refresh();
   }
 
+  // ---------------------------------------------------------------------------
+  // Deploy form: show the weights URL only for apps that ask for one.
+  // ---------------------------------------------------------------------------
+  function setupRuntimeModelUrl() {
+    document.querySelectorAll('form[action="/deployments"]').forEach((form) => {
+      const select = form.querySelector('select[name="model_card_uid"]');
+      const field = form.querySelector("[data-runtime-model-url]");
+      const input = form.querySelector('input[name="model_download_url"]');
+      if (!select || !field || !input) return;
+      function refresh() {
+        const opt = select.options[select.selectedIndex];
+        const on = !!(opt && opt.dataset.runtimeModelUrl === "1");
+        field.style.display = on ? "" : "none";
+        input.disabled = !on;
+        input.required = on;
+      }
+      select.addEventListener("change", refresh);
+      refresh();
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     setupSidebar();
     setupFormLoading();
@@ -195,6 +227,7 @@
     setupCopy();
     setupTargetSwitcher();
     setupArtifactSource();
+    setupRuntimeModelUrl();
     setupDeviceTiles();
   });
 })();

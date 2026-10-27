@@ -501,12 +501,16 @@ pre {
   background: #0b1020; color: white;
   box-shadow: var(--shadow-lg);
   font-size: 13.5px;
+  max-width: min(480px, calc(100vw - 48px));
+  white-space: pre-wrap;
+  line-height: 1.45;
+  cursor: pointer;
   opacity: 0; transform: translateY(8px);
   animation: toast-in .2s ease forwards;
 }
 .toast--success { background: #065f46; }
 .toast--warn { background: #92400e; }
-.toast--danger { background: #9f1239; }
+.toast--danger, .toast--error { background: #9f1239; }
 @keyframes toast-in { to { opacity: 1; transform: translateY(0); } }
 
 /* --------------------------------------------------------------------------
@@ -626,6 +630,21 @@ pre {
 .device-tile__meta {
   display: flex; flex-wrap: wrap; gap: 4px;
   color: var(--text-mute); font-size: 12.5px; margin-top: 4px;
+}
+.compat-reqs { display: grid; gap: 10px; margin-top: 12px; }
+.compat-req {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-elev); padding: 10px 12px;
+}
+.compat-req__name { font-weight: 600; font-size: 13.5px; margin-bottom: 8px; }
+.compat-req__grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px; align-items: end;
+}
+.compat-req__grid label { display: grid; gap: 4px; font-size: 12px; color: var(--text-mute); }
+.compat-req__cuda {
+  display: flex !important; align-items: center; gap: 6px;
+  grid-auto-flow: column; justify-content: start; padding-bottom: 8px;
 }
 .device-tile:hover { border-color: var(--brand-400); }
 .device-tile.is-checked,

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from app.config import get_settings
 from app.core.errors import ConflictError, DomainError, NotFoundError, ValidationError
@@ -30,7 +31,13 @@ from app.repositories import devices as devices_repo
 from app.repositories import groups as groups_repo
 from app.repositories import model_cards as mc_repo
 from app.repositories import mqtt_audit as audit_repo
-from app.services import device_capabilities, event_service, mqtt_service
+from app.services import (
+    compatibility_service,
+    device_capabilities,
+    event_service,
+    mqtt_service,
+    provenance_service,
+)
 
 log = get_logger("deployment")
 
@@ -52,6 +59,21 @@ def _resolve_patra_download_url(patra_uuid: str) -> Optional[str]:
     return f"{base}/modelcard/{patra_uuid}/download_url"
 
 
+def _apply_runtime_model_url(payload: Dict[str, Any], url: str) -> None:
+    """Download the deployer's URL into the filename already on the app.
+
+    Links such as Tapis postit redeem URLs carry no filename. The agent saves
+    the response at the card's artifact path and the container keeps MODEL_PATH.
+    """
+    artifact = payload["artifact"]
+    artifact["source_type"] = "url"
+    artifact["download_url"] = url
+    artifact["patra_model_card_uuid"] = None
+    artifact["patra_resolve_url"] = None
+    artifact["sha256"] = None
+    artifact["size_bytes"] = None
+
+
 def build_deploy_payload(
     *,
     deployment_uid: str,
@@ -59,6 +81,7 @@ def build_deploy_payload(
     card: dict,
     device_uid: Optional[str] = None,
     device: Optional[dict] = None,
+    runtime_model_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Assemble the self-contained deploy_model MQTT payload from a card aggregate."""
     artifact = card["artifact"]
@@ -138,6 +161,8 @@ def build_deploy_payload(
             ],
         },
     }
+    if runtime_model_url:
+        _apply_runtime_model_url(payload, runtime_model_url)
     return payload
 
 
@@ -271,27 +296,54 @@ def _dispatch_deploy(
     """Publish deploy_model to device topic(s).
 
     Group deploys publish once per device so each container gets its own
-    ``STREAM_INGEST_URL`` (``cam-{device_uid}`` on the ingest pod).
+    ``STREAM_INGEST_URL`` (``cam-{device_uid}`` on the ingest pod). All
+    commands are recorded first, then sent over one broker connection.
     """
-    results: List[tuple[str, Optional[str], Optional[str]]] = []
     if target_type == "DEVICE":
         targets = [(target_uid, request_id)]
     else:
         targets = [(d["device_uid"], gen_request_id()) for d in target_devices]
 
+    records = []
     for device_uid, cmd_request_id in targets:
         payload = payload_builder(device_uid)
         payload["request_id"] = cmd_request_id
-        results.append(
-            _publish_command(
-                owner=owner,
-                dep={"target_type": "DEVICE", "target_uid": device_uid},
-                deployment_uid=deployment_uid,
-                operation="deploy_model",
-                request_id=cmd_request_id,
-                payload=payload,
-            )
+        topic, target_gone = _record_command(
+            owner=owner,
+            dep={"target_type": "DEVICE", "target_uid": device_uid},
+            deployment_uid=deployment_uid,
+            operation="deploy_model",
+            request_id=cmd_request_id,
+            payload=payload,
         )
+        records.append((cmd_request_id, topic, payload, target_gone))
+
+    outcome: Dict[str, tuple[str, Optional[str]]] = {
+        rid: ("RECORDED", "target device no longer exists" if gone else None)
+        for rid, _, _, gone in records
+    }
+    to_send = [(rid, topic, payload) for rid, topic, payload, gone in records if not gone]
+    if to_send and get_settings().mqtt.enabled:
+        try:
+            with mqtt_service.publisher() as pub:
+                infos = []
+                for rid, topic, payload in to_send:
+                    try:
+                        infos.append((rid, pub.send(topic, payload)))
+                    except Exception as e:
+                        outcome[rid] = _mark_failed(rid, e)
+                for rid, info in infos:
+                    try:
+                        pub.confirm(info)
+                        outcome[rid] = _mark_sent(rid)
+                    except Exception as e:
+                        outcome[rid] = _mark_failed(rid, e)
+        except Exception as e:
+            for rid, _, _ in to_send:
+                if outcome[rid][0] == "RECORDED":
+                    outcome[rid] = _mark_failed(rid, e)
+
+    results = [(*outcome[rid], topic) for rid, topic, _, _ in records]
 
     statuses = [r[0] for r in results]
     errs = [r[1] for r in results if r[1]]
@@ -307,7 +359,8 @@ def _dispatch_deploy(
 
 
 _ACTIVE_DEPLOYMENT_STATUSES = {
-    "RUNNING", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING", "STOPPING",
+    "RUNNING", "DEGRADED", "STARTING", "DELIVERING", "DOWNLOADING", "PULLING",
+    "STOPPING",
 }
 
 
@@ -338,7 +391,7 @@ def get_active_device_deployment(device_uid: str, owner: str) -> Optional[dict]:
     return None
 
 
-def _publish_command(
+def _record_command(
     *,
     owner: str,
     dep: dict,
@@ -346,15 +399,13 @@ def _publish_command(
     operation: str,
     request_id: str,
     payload: Dict[str, Any],
-) -> tuple[str, Optional[str], Optional[str]]:
-    """Record the command first, then publish via MQTT.
-
-    The agent can ACK within milliseconds of receiving MQTT — the row must
-    exist before the broker delivers the message.
-    """
+) -> tuple[str, bool]:
+    """Insert the command + audit rows. Returns (topic, target_gone)."""
     topic = mqtt_service.topic_for(dep["target_type"], dep["target_uid"])
-    settings = get_settings()
     device_uid = dep["target_uid"] if dep["target_type"] == "DEVICE" else None
+    target_gone = bool(device_uid) and devices_repo.get_any(device_uid) is None
+    if target_gone:
+        device_uid = None
     commands_repo.insert(
         command_uid=gen_uid("cmd"),
         owner=owner,
@@ -376,21 +427,51 @@ def _publish_command(
         device_uid=device_uid,
         payload=payload,
     )
-    status = "RECORDED"
-    err: Optional[str] = None
-    sent_at: Optional[str] = None
-    if settings.mqtt.enabled:
-        try:
-            mqtt_service.publish(topic, payload)
-            status = "MQTT_SENT"
-            sent_at = now_iso()
-            commands_repo.update_send_status(request_id, status=status, sent_at=sent_at)
-        except Exception as e:
-            log.exception("MQTT publish failed: %s", e)
-            status = "MQTT_FAILED"
-            err = str(e)
-            commands_repo.update_send_status(request_id, status=status, error=err)
-    return status, err, topic
+    if target_gone:
+        commands_repo.update_send_status(
+            request_id, status="RECORDED", error="target device no longer exists"
+        )
+    return topic, target_gone
+
+
+def _mark_sent(request_id: str) -> tuple[str, Optional[str]]:
+    commands_repo.update_send_status(request_id, status="MQTT_SENT", sent_at=now_iso())
+    return "MQTT_SENT", None
+
+
+def _mark_failed(request_id: str, e: Exception) -> tuple[str, Optional[str]]:
+    log.error("MQTT publish failed for %s: %s", request_id, e)
+    commands_repo.update_send_status(request_id, status="MQTT_FAILED", error=str(e))
+    return "MQTT_FAILED", str(e)
+
+
+def _publish_command(
+    *,
+    owner: str,
+    dep: dict,
+    deployment_uid: str,
+    operation: str,
+    request_id: str,
+    payload: Dict[str, Any],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Record the command first, then publish via MQTT.
+
+    The agent can ACK within milliseconds of receiving MQTT — the row must
+    exist before the broker delivers the message.
+    """
+    topic, target_gone = _record_command(
+        owner=owner, dep=dep, deployment_uid=deployment_uid,
+        operation=operation, request_id=request_id, payload=payload,
+    )
+    if target_gone:
+        return "RECORDED", "target device no longer exists", topic
+    if not get_settings().mqtt.enabled:
+        return "RECORDED", None, topic
+    try:
+        mqtt_service.publish(topic, payload)
+    except Exception as e:
+        return (*_mark_failed(request_id, e), topic)
+    return (*_mark_sent(request_id), topic)
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +479,7 @@ def _publish_command(
 # ---------------------------------------------------------------------------
 
 def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str,
-           notes: Optional[str] = None) -> dict:
+           notes: Optional[str] = None, runtime_model_url: Optional[str] = None) -> dict:
     target_type = target_type.upper()
     if target_type not in {"DEVICE", "GROUP"}:
         raise ValidationError("target_type must be DEVICE or GROUP.")
@@ -414,6 +495,15 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
     from app.services import model_service
     if not model_service.can_deploy(owner, card):
         raise ValidationError("You don't have permission to deploy this app.")
+
+    runtime_model_url = (runtime_model_url or "").strip() or None
+    if model_service.accepts_runtime_model_url(card):
+        if not runtime_model_url:
+            raise ValidationError("This app requires a model download URL.")
+        if urlparse(runtime_model_url).scheme not in {"http", "https"}:
+            raise ValidationError("Model URL must start with http:// or https://.")
+    else:
+        runtime_model_url = None
 
     target_devices, target_name = _resolve_target(owner, target_type, target_uid)
     if not target_devices:
@@ -434,6 +524,7 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
         target_name=target_name,
         request_id=request_id,
         notes=notes,
+        runtime_model_url=runtime_model_url,
     )
     for d in target_devices:
         dep_repo.create_device_deployment(
@@ -456,6 +547,7 @@ def create(*, owner: str, model_card_uid: str, target_type: str, target_uid: str
             card=card,
             device_uid=device_uid,
             device=devices_repo.get_any(device_uid),
+            runtime_model_url=runtime_model_url,
         ),
     )
     if status == "MQTT_SENT":
@@ -503,7 +595,9 @@ def redispatch(*, owner: str, deployment_uid: str) -> dict:
         raise ValidationError("Model card is missing artifact or container spec.")
 
     request_id = gen_request_id()
+    runtime_model_url = (dep.get("runtime_model_url") or "").strip() or None
     target_devices, _ = _resolve_target(owner, dep["target_type"], dep["target_uid"])
+    _assert_compatibility(card, target_devices)
     status, err, topic = _dispatch_deploy(
         owner=owner,
         deployment_uid=deployment_uid,
@@ -518,6 +612,7 @@ def redispatch(*, owner: str, deployment_uid: str) -> dict:
             card=card,
             device_uid=device_uid,
             device=devices_repo.get_any(device_uid),
+            runtime_model_url=runtime_model_url,
         ),
     )
     if status == "MQTT_SENT":
@@ -547,6 +642,20 @@ def stop(*, owner: str, deployment_uid: str, purge: bool = False) -> dict:
         raise NotFoundError("Deployment not found")
     reconcile_deployment_status(deployment_uid)
     dep = dep_repo.get(deployment_uid, owner)
+    if _target_device_gone(dep):
+        _settle_local(
+            deployment_uid,
+            "STOPPED",
+            error="Target device was deleted — nothing sent to the agent",
+        )
+        event_service.record(
+            "DEPLOYMENT_STOP_SKIPPED_NO_DEVICE",
+            f"Stop skipped; target device {dep.get('target_uid')} is gone",
+            severity="WARN",
+            owner=owner,
+            deployment_uid=deployment_uid,
+        )
+        return get_full(deployment_uid, owner)
     if dep["status"] in {"STOPPED", "FAILED"}:
         if purge:
             pass  # purge-only cleanup of a stopped deployment
@@ -613,7 +722,7 @@ def dismiss(*, owner: str, deployment_uid: str) -> dict:
         raise NotFoundError("Deployment not found")
     if dep["status"] in {"STOPPED", "FAILED", "CANCELLED"}:
         raise ConflictError("Deployment is already settled.")
-    if dep["status"] == "RUNNING":
+    if dep["status"] in {"RUNNING", "DEGRADED"}:
         raise ConflictError("Use Stop to request the agent to remove the container.")
 
     for dd in dep_repo.list_device_deployments(deployment_uid):
@@ -644,17 +753,26 @@ def cancel(*, owner: str, deployment_uid: str) -> dict:
         raise ConflictError("Deployment is already removed.")
 
     purge_sent = False
-    try:
-        stop(owner=owner, deployment_uid=deployment_uid, purge=True)
-        purge_sent = True
-    except DomainError as exc:
+    if _target_device_gone(dep):
         event_service.record(
             "DEPLOYMENT_CANCEL_PURGE_SKIPPED",
-            f"Purge before remove skipped: {exc}",
+            "Purge before remove skipped: target device no longer exists",
             severity="WARN",
             owner=owner,
             deployment_uid=deployment_uid,
         )
+    else:
+        try:
+            stop(owner=owner, deployment_uid=deployment_uid, purge=True)
+            purge_sent = True
+        except DomainError as exc:
+            event_service.record(
+                "DEPLOYMENT_CANCEL_PURGE_SKIPPED",
+                f"Purge before remove skipped: {exc}",
+                severity="WARN",
+                owner=owner,
+                deployment_uid=deployment_uid,
+            )
 
     for dd in dep_repo.list_device_deployments(deployment_uid):
         if dd["status"] not in {"STOPPED", "FAILED"}:
@@ -754,6 +872,10 @@ def effective_status(parent_status: str, device_rows: List[dict]) -> str:
         return "FAILED" if statuses == {"FAILED"} else "STOPPED"
     if parent in {"STARTING", "DELIVERING", "DOWNLOADING", "PULLING"} and statuses == {"RUNNING"}:
         return "RUNNING"
+    if parent in {"RUNNING", "DEGRADED"} and "DEGRADED" in statuses:
+        return "DEGRADED"
+    if parent == "DEGRADED" and statuses == {"RUNNING"}:
+        return "RUNNING"
     if parent in {"STARTING", "DELIVERING", "DOWNLOADING", "PULLING"} and statuses <= terminal:
         return "FAILED" if "FAILED" in statuses else "STOPPED"
     return parent
@@ -778,7 +900,7 @@ def reconcile_deployment_status(deployment_uid: str) -> None:
         dep = dep_repo.get_any(deployment_uid) or dep
 
     settled = effective_status(dep["status"], rows)
-    if settled != dep["status"] and settled in {"STOPPED", "FAILED", "RUNNING"}:
+    if settled != dep["status"] and settled in {"STOPPED", "FAILED", "RUNNING", "DEGRADED"}:
         dep_repo.update_status(deployment_uid, settled)
 
 
@@ -839,6 +961,9 @@ def poll_snapshot(deployment_uid: str, owner: str) -> dict:
             "container_name": row.get("container_name"),
             "error_message": row.get("error_message"),
             "updated_at": row.get("updated_at"),
+            "provenance_status": row.get("provenance_status"),
+            "observed_artifact_sha256": row.get("observed_artifact_sha256"),
+            "observed_image_digest": row.get("observed_image_digest"),
         }
         if media.mode == "mediamtx":
             entry["hls_url"] = media.hls_url(row["device_uid"])
@@ -868,6 +993,8 @@ def get_full(deployment_uid: str, owner: str) -> dict:
     dep["devices"] = dep_repo.list_device_deployments(deployment_uid)
     dep["commands"] = commands_repo.list_for_deployment(deployment_uid)
     dep["card"] = mc_repo.get_full(dep["model_card_uid"])
+    deploy_cmd = next((c for c in dep["commands"] if c.get("operation") == "deploy_model"), None)
+    dep["declared_provenance"] = provenance_service.declared_from_command(deploy_cmd)
     return dep
 
 
@@ -878,6 +1005,21 @@ def counts(owner: str) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _target_device_gone(dep: dict) -> bool:
+    if (dep.get("target_type") or "").upper() != "DEVICE":
+        return False
+    return devices_repo.get_any(dep.get("target_uid") or "") is None
+
+
+def _settle_local(deployment_uid: str, status: str, *, error: Optional[str] = None) -> None:
+    for dd in dep_repo.list_device_deployments(deployment_uid):
+        if dd["status"] not in {"STOPPED", "FAILED"}:
+            dep_repo.update_device_deployment_status(
+                deployment_uid, dd["device_uid"], status="STOPPED", error=error
+            )
+    dep_repo.update_status(deployment_uid, status)
+
 
 def _resolve_target(owner: str, target_type: str, target_uid: str) -> tuple[List[dict], str]:
     if target_type == "DEVICE":
@@ -893,22 +1035,17 @@ def _resolve_target(owner: str, target_type: str, target_uid: str) -> tuple[List
 
 
 def _assert_compatibility(card: dict, devices: List[dict]) -> None:
-    allowed = {c["generation_uid"] for c in card.get("compatibility", [])}
-    if allowed:
-        incompatible = [d for d in devices if d["generation_uid"] not in allowed]
-        if incompatible:
-            names = ", ".join(d["device_name"] for d in incompatible[:5])
-            raise ValidationError(
-                f"Model '{card['display_name']}' is not compatible with: {names}. "
-                "Update model compatibility on the model card, or pick a different target."
-            )
-    cap_errors = []
+    problems = []
     for d in devices:
-        err = device_capabilities.device_compatible_with_card(d, card)
-        if err:
-            cap_errors.append("%s: %s" % (d["device_name"], err))
-    if cap_errors:
-        raise ValidationError("; ".join(cap_errors))
+        reasons = compatibility_service.check(card, d)
+        if reasons:
+            problems.append("%s: %s" % (d["device_name"], "; ".join(reasons)))
+    if problems:
+        raise ValidationError(
+            f"'{card['display_name']}' cannot be deployed to "
+            + " | ".join(problems[:5])
+            + (" | …" if len(problems) > 5 else "")
+        )
 
 
 def _docker_image_ref(spec: dict) -> str:

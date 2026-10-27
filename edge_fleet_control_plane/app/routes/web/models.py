@@ -100,6 +100,7 @@ def new_app(request: Request):
             "generations": gen_repo.list_active(),
             "errors": [],
             "form": {},
+            "compat_by_uid": {},
         },
     )
 
@@ -124,6 +125,7 @@ async def create_app(request: Request):
                 "generations": gen_repo.list_active(),
                 "errors": str(e).split("; "),
                 "form": form_dict,
+                "compat_by_uid": _compat_by_uid(form_dict),
             },
             status_code=422,
         )
@@ -172,6 +174,7 @@ def app_detail(request: Request, model_card_uid: str):
             "active_nav": "apps",
             "card": card,
             "is_owner": model_service.is_owner(owner, card),
+            "can_manage": model_service.can_manage(owner, card),
         },
     )
 
@@ -194,6 +197,7 @@ def edit_app(request: Request, model_card_uid: str):
             "generations": gen_repo.list_active(),
             "errors": [],
             "form": _card_to_form(card),
+            "compat_by_uid": _compat_by_uid(_card_to_form(card)),
         },
     )
 
@@ -218,6 +222,7 @@ async def update_app(request: Request, model_card_uid: str):
                 "generations": gen_repo.list_active(),
                 "errors": str(e).split("; "),
                 "form": form_dict,
+                "compat_by_uid": _compat_by_uid(form_dict),
             },
             status_code=422,
         )
@@ -268,6 +273,34 @@ def delete_app(request: Request, model_card_uid: str):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _as_list(form: dict, key: str) -> list:
+    value = form.get(key)
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _compat_by_uid(form: dict) -> dict:
+    """Saved compatibility row per generation, for the edit form."""
+    saved = form.get("compat_by_uid")
+    if isinstance(saved, dict) and saved:
+        return saved
+    uids = _as_list(form, "compat_generation_uid")
+    memories = _as_list(form, "compat_min_memory_mb")
+    disks = _as_list(form, "compat_min_storage_gb")
+    notes = _as_list(form, "compat_notes")
+    cuda = set(_as_list(form, "compat_requires_cuda"))
+    rows = {}
+    for index, uid in enumerate(uids):
+        rows[uid] = {
+            "min_memory_mb": memories[index] if index < len(memories) else "",
+            "min_storage_gb": disks[index] if index < len(disks) else "",
+            "requires_cuda": uid in cuda or str(index) in cuda,
+            "notes": notes[index] if index < len(notes) else "",
+        }
+    return rows
+
+
 def _form_to_dict(form) -> dict:
     """Convert FastAPI's FormData into a dict that preserves repeated keys as lists."""
     out: dict[str, object] = {}
@@ -292,6 +325,9 @@ def _card_to_form(card: dict) -> dict:
         "license": card.get("license"),
         "homepage_url": card.get("homepage_url"),
         "tags": ", ".join(card.get("tags") or []),
+        "allow_runtime_model_url": (
+            "on" if model_service.RUNTIME_MODEL_URL_TAG in {t.lower() for t in (card.get("tags") or [])} else ""
+        ),
         "status": card.get("status"),
         "visibility": card.get("visibility") or "private",
         "patra_model_card_uuid": card.get("patra_model_card_uuid") or artifact.get("patra_model_card_uuid"),
@@ -305,6 +341,10 @@ def _card_to_form(card: dict) -> dict:
         "artifact_size_bytes": artifact.get("size_bytes"),
         "artifact_sha256": artifact.get("sha256"),
         "artifact_notes": artifact.get("notes"),
+        "artifact_engine_compute_capability": artifact.get("engine_compute_capability"),
+        "artifact_engine_tensorrt_version": artifact.get("engine_tensorrt_version"),
+        "artifact_engine_l4t_version": artifact.get("engine_l4t_version"),
+        "artifact_engine_precision": artifact.get("engine_precision"),
         "spec_image_registry": spec.get("image_registry"),
         "spec_image_repository": spec.get("image_repository"),
         "spec_image_tag": spec.get("image_tag"),
@@ -334,5 +374,6 @@ def _card_to_form(card: dict) -> dict:
         "port_container": [p["container_port"] for p in (spec.get("ports") or [])],
         "port_protocol": [p.get("protocol") or "tcp" for p in (spec.get("ports") or [])],
         "compat_generation_uid": [c["generation_uid"] for c in (card.get("compatibility") or [])],
+        "compat_by_uid": {c["generation_uid"]: c for c in (card.get("compatibility") or [])},
     }
     return form

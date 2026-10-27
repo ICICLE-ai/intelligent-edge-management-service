@@ -19,7 +19,7 @@
   </div>
   <div class="page-header__actions">
     <a class="btn btn--outline" href="/devices/{{ device.device_uid }}/installer">Download Installer</a>
-    <form method="post" action="/devices/{{ device.device_uid }}/delete" data-confirm="Delete this device record? This does not uninstall the agent." style="display:inline-block">
+    <form method="post" action="/devices/{{ device.device_uid }}/delete" data-confirm="Delete this device record? Inactive deployments for it will be removed from the portal. Stop or delete a running deployment first so the board can be cleaned up. This does not uninstall the agent." style="display:inline-block">
       <button class="btn btn--ghost">Delete</button>
     </form>
   </div>
@@ -42,7 +42,7 @@
   </div>
   <div class="stat stat--amber">
     <div class="stat__label">Active deployments</div>
-    <div class="stat__value">{{ deployments|selectattr('status','in',['RUNNING','DELIVERING','PENDING','STARTING'])|list|length }}</div>
+    <div class="stat__value">{{ deployments|selectattr('status','in',['RUNNING','DEGRADED','DELIVERING','PENDING','STARTING'])|list|length }}</div>
     <div class="stat__delta">{{ deployments|length }} total</div>
   </div>
   <div class="stat stat--slate">
@@ -72,6 +72,7 @@
             <label class="field__label">Notes <span class="text-mute">(optional)</span></label>
             <input class="input" name="notes" placeholder="Field-trial run #4">
           </div>
+          {% include "_partials/runtime_model_url.html" %}
         </div>
         <div class="row">
           <button class="btn btn--success" data-loading-text="Dispatching…">Deploy to this device</button>
@@ -285,7 +286,7 @@ sudo ./install.sh</pre>
             <td class="small text-soft">{{ d.started_at | relative if d.started_at else d.created_at | relative }}</td>
             <td class="right" data-poll-deployment-actions>
               {% set eff = d.effective_status | default(d.status) %}
-              {% set row_stoppable = eff in ['RUNNING', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
+              {% set row_stoppable = eff in ['RUNNING', 'DEGRADED', 'DELIVERING', 'STARTING', 'DOWNLOADING', 'PULLING', 'STOPPING'] %}
               {% set row_restartable = eff == 'STOPPED' %}
               <form method="post" action="/deployments/{{ d.deployment_uid }}/stop" data-confirm="Remove the container? Image and model files are kept for restart." data-poll-action="stop" style="display:inline-block"{% if not row_stoppable %} hidden{% endif %}>
                 <input type="hidden" name="redirect_to" value="/devices/{{ device.device_uid }}">

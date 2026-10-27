@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import List, Optional
 
 from app.core.time import now_iso
@@ -171,6 +172,13 @@ def update_after_heartbeat(device_uid: str, *, status: str, hostname: Optional[s
          WHERE device_uid = ?
         """,
         (status, heartbeat_at, heartbeat_at, hostname, ip_address, agent_version, heartbeat_at, device_uid),
+    )
+
+
+def update_platform(device_uid: str, platform: dict, reported_at: str) -> None:
+    execute(
+        "UPDATE devices SET platform_json = ?, platform_reported_at = ? WHERE device_uid = ?",
+        (json.dumps(platform), reported_at, device_uid),
     )
 
 

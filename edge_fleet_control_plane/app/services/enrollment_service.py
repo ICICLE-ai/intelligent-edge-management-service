@@ -16,6 +16,7 @@ from app.core.errors import ConflictError, ForbiddenError, GoneError, NotFoundEr
 from app.core.ids import gen_uid
 from app.core.time import now_iso, parse_iso
 from app.repositories import device_credentials as creds_repo
+from app.repositories import deployments as dep_repo
 from app.repositories import devices as devices_repo
 from app.repositories import enrollments as enrollments_repo
 from app.repositories import groups as groups_repo
@@ -163,6 +164,7 @@ def enroll(payload: Dict[str, Any]) -> Dict[str, Any]:
         "status": "ENROLLED",
         "device_api_key": device_api_key,
         "device_config": device_runtime_config(devices_repo.get_any(device["device_uid"]) or device),
+        "device_deployments": dep_repo.summaries_for_device(device["device_uid"]),
     }
 
 

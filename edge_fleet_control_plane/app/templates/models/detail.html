@@ -21,13 +21,16 @@
       {% if card.patra_model_card_uuid %}
         · Patra <span data-copy="{{ card.patra_model_card_uuid }}" class="mono small copy-link">{{ card.patra_model_card_uuid }}</span>
       {% endif %}
+      {% if 'runtime-model-url' in (card.tags or []) %}
+        · deployers supply their own model URL
+      {% endif %}
       {% if card.task_type %} · {{ card.task_type }}{% endif %}
       {% if card.framework %} · {{ card.framework }}{% endif %}
       {% if card.license %} · {{ card.license }}{% endif %}
     </div>
   </div>
   <div class="page-header__actions">
-    {% if is_owner %}
+    {% if can_manage %}
     <a class="btn btn--ghost" href="/apps/{{ card.model_card_uid }}/edit">Edit</a>
     {% if card.status != 'PUBLISHED' %}
       <form method="post" action="/apps/{{ card.model_card_uid }}/publish" style="display:inline-block">
@@ -98,6 +101,10 @@
         {% if artifact.download_url %}<dt>Download URL</dt><dd class="mono small">{{ artifact.download_url }}</dd>{% endif %}
         {% if artifact.size_bytes %}<dt>Size</dt><dd>{{ artifact.size_bytes }} bytes</dd>{% endif %}
         {% if artifact.sha256 %}<dt>SHA-256</dt><dd class="mono small">{{ artifact.sha256 }}</dd>{% endif %}
+        {% if artifact.engine_compute_capability %}<dt>Engine GPU</dt><dd class="mono">sm {{ artifact.engine_compute_capability }}</dd>{% endif %}
+        {% if artifact.engine_tensorrt_version %}<dt>Engine TensorRT</dt><dd class="mono">{{ artifact.engine_tensorrt_version }}</dd>{% endif %}
+        {% if artifact.engine_l4t_version %}<dt>Engine L4T</dt><dd class="mono">{{ artifact.engine_l4t_version }}</dd>{% endif %}
+        {% if artifact.engine_precision %}<dt>Precision</dt><dd class="mono">{{ artifact.engine_precision }}</dd>{% endif %}
         {% if artifact.notes %}<dt>Notes</dt><dd>{{ artifact.notes }}</dd>{% endif %}
       </dl>
     </div>

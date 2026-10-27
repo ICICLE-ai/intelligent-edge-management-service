@@ -1,0 +1,15 @@
+# ultralytics is installed with --no-deps in the Dockerfile.
+# torch, torchvision, and opencv come from the Jetson base image.
+ultralytics==8.3.253
+matplotlib
+pandas
+seaborn
+scipy
+tqdm
+pyyaml
+requests
+psutil
+py-cpuinfo
+polars
+ultralytics-thop
+pillow
