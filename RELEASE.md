@@ -3,7 +3,52 @@
 User-facing, dated notes for **GitHub Releases** are in [docs/RELEASES.md](docs/RELEASES.md).
 Paste the latest section when you tag a release (title `Release YYYY-MM`).
 
-The section below is the ICICLE catalog snapshot for **0.1.0**.
+The section below is the ICICLE catalog snapshot for **0.2.0**. Version 0.1.0 is kept underneath it.
+
+## Version 0.2.0
+
+**Component ID:** `IntelligentEdgeManagementService:0.2.0`  
+**Status:** BetaRelease  
+**Previous:** `IntelligentEdgeManagementService:0.1.0`  
+**Production URL:** https://edgecontrolplane.pods.icicleai.tapis.io  
+**Git tag:** `v0.2.0`  
+**Image:** `habg21/edge-control-plane:v13`
+
+### Summary
+
+Deploy-time hardware checks, verification of what each device actually started, and recovery when a container disappears. Adds the Faux Weed YOLO11 live app for AGX Xavier (JetPack 4) and a deployer-supplied weights URL.
+
+### Features
+
+- **Compatibility check** refuses a deploy that does not match the device generation, free resources, or engine build target (GPU compute capability, TensorRT, L4T).
+- **Editable requirements.** The app owner sets minimum memory, minimum free disk, CUDA, and notes for each selected generation.
+- **Platform report** from the agent, including Tegra chip detection for JetPack 4 AGX Xavier.
+- **Provenance** on RUNNING: artifact sha256 and the running container's image id and digest, classified against the deploy command.
+- **Recovery:** restore after reboot, DEGRADED when a heartbeat loses a container, ignore a stale deploy after stop, ignore an acknowledgement superseded by a newer command.
+- **Weights URL at launch** and the Ultralytics CSI catalog app.
+- **Faux Weed YOLO11** catalog app for JetPack 4, engine on Hugging Face.
+- **Theater view** for stream tiles.
+- **Group deploy** uses one MQTT connection.
+- **Timings export** and on-device measurement scripts under `edge_fleet_control_plane/eval/`.
+
+### Upgrade checklist
+
+1. Build and push `linux/amd64`. Prefer a new image tag. If the tag is reused, recreate the pod so it pulls again.
+2. Allowlist a new tag on Tapis Pods.
+3. Update the pod image. Keep `command` and `arguments` null.
+4. Confirm `/api/health`.
+5. Reinstall device agents (`edge-agent-v2.5.1`).
+
+### Rollback
+
+Redeploy the image built from `v0.1.0` and reinstall agents from that portal.
+
+### Known limitations
+
+- TensorRT is read from the host. Containers that ship their own TensorRT are not compared against that copy, and the engine file is not loaded.
+- Resource minimums are app settings. A minimum above the device's free disk or memory refuses the deploy.
+- Provenance does not inspect the process inside the container.
+- No pytest suite. Smoke, provenance, and compatibility scripts plus the 26 October 2026 user test are the verification record.
 
 ## Version 0.1.0
 
