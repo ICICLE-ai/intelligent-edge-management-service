@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="ICICLE Edge Control Plane",
-        version="2.0.0",
+        version="0.2.0",
         description="Fleet management and model deployment for edge inference.",
         docs_url="/api/docs",
         redoc_url=None,

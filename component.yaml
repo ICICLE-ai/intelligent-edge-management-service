@@ -1,7 +1,7 @@
 # ICICLE component catalog metadata for Intelligent Edge Management Service.
 # See templates/COMPONENT_INFO_SKILL.md for field definitions and validation rules.
 
-- id: "IntelligentEdgeManagementService:0.1.0"
+- id: "IntelligentEdgeManagementService:0.2.0"
   owner: "Harikesh Byrandurga Gopinath"
   primaryThrust: "core/CI4AI"
   name: "Intelligent Edge Management Service"
@@ -9,8 +9,9 @@
   description: >
     Fleet control plane for deploying and managing AI applications on ICICLE edge
     devices. Provides a web dashboard, device agent orchestration over MQTT,
-    model-card deployments, heartbeat monitoring, and TapisUI portal integration.
-  componentVersion: "0.1.0"
+    model-card deployments, heartbeat monitoring, deploy-time hardware checks,
+    deployment verification, and TapisUI portal integration.
+  componentVersion: "0.2.0"
   targetIcicleRelease: None
 
   hasDependentComponents:
