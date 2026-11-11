@@ -7,7 +7,7 @@
   <div>
     <div class="page-header__title"><h1 class="title-gradient">Set up a new device</h1></div>
     <div class="page-header__subtitle">
-      Choose hardware, configure cameras, then install the agent on your Jetson. We'll walk you through each step.
+      Choose hardware, describe what it is connected to, then install the agent on it. We'll walk you through each step.
     </div>
   </div>
 </div>
@@ -16,7 +16,7 @@
   <nav class="setup-wizard__steps" aria-label="Setup progress">
     <ol class="setup-steps">
       <li class="setup-steps__item is-active" data-step-nav="1"><span class="setup-steps__num">1</span> Hardware</li>
-      <li class="setup-steps__item" data-step-nav="2"><span class="setup-steps__num">2</span> Cameras</li>
+      <li class="setup-steps__item" data-step-nav="2"><span class="setup-steps__num">2</span> <span data-step2-label>Cameras</span></li>
       <li class="setup-steps__item" data-step-nav="3"><span class="setup-steps__num">3</span> Identity</li>
       <li class="setup-steps__item" data-step-nav="4"><span class="setup-steps__num">4</span> Review</li>
     </ol>
@@ -28,12 +28,12 @@
     <section class="setup-panel is-active" data-step-panel="1">
       <header class="setup-panel__head">
         <h2>Select device generation</h2>
-        <p class="text-soft small">Pick the hardware generation. This controls compatible apps (Jetson CSI/TensorRT vs PowerEdge GPU/RTSP).</p>
+        <p class="text-soft small">Pick the hardware generation. This controls which apps it can run and what the next step asks for.</p>
       </header>
       <div class="device-grid">
         {% for g in generations %}
         <label class="device-tile">
-          <input type="radio" name="generation_uid" value="{{ g.generation_uid }}" {% if loop.first %}required{% endif %}>
+          <input type="radio" name="generation_uid" value="{{ g.generation_uid }}" data-setup-flow="{{ g.setup_flow or 'camera' }}" {% if loop.first %}required{% endif %}>
           <div class="device-tile__head">
             <span class="device-tile__name">{{ g.display_name }}</span>
             <span class="device-tile__check" aria-hidden="true">✓</span>
@@ -47,8 +47,32 @@
       </div>
     </section>
 
-    <!-- Step 2: Cameras -->
+    <!-- Step 2: Cameras, or the capture station for a scan station -->
     <section class="setup-panel" data-step-panel="2" hidden>
+      <div data-flow-panel="scan-station" hidden>
+        <header class="setup-panel__head">
+          <h2>Capture station</h2>
+          <p class="text-soft small">This device runs the scan service. A separate capture station on the same network turns the table and records each scan. This device copies the frames from it over SSH, so the capture station is not enrolled here.</p>
+        </header>
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label" for="capture_host">Capture station SSH host</label>
+            <input class="input" id="capture_host" name="capture_host" value="jetson" placeholder="jetson" data-flow-input />
+            <div class="field__hint">The host name or <code>~/.ssh/config</code> alias this device uses to reach the capture station.</div>
+          </div>
+          <div class="field">
+            <label class="field__label" for="scan_token">Scan token <span class="text-mute">(optional)</span></label>
+            <input class="input" id="scan_token" name="scan_token" autocomplete="off" placeholder="Leave blank to generate one" data-flow-input />
+            <div class="field__hint">Shared by the scan service and the capture station's agent. If the capture station already has a token in its <code>config.toml</code>, paste it here.</div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ssh_dir">SSH folder on this device</label>
+          <input class="input" id="ssh_dir" name="ssh_dir" placeholder="/home/USER/.ssh" data-flow-input />
+          <div class="field__hint">The <code>.ssh</code> folder of the user who can already <code>ssh</code> to the capture station without a password. The scan service mounts it read-only to copy frames.</div>
+        </div>
+      </div>
+      <div data-flow-panel="camera">
       <header class="setup-panel__head">
         <h2>Camera configuration</h2>
         <p class="text-soft small">Used for app compatibility and per-camera ingest URL injection on deploy.</p>
@@ -74,6 +98,7 @@
         <div class="field__hint" data-setup-indices-hint>Only for GigE Hikrobot (MVS). Comma-separated indices into the MVS device list — must match camera count.</div>
       </div>
       <p class="small text-soft" data-setup-mount-hint hidden>GigE MVS apps mount <code>/opt/MVS</code> from the host read-only.</p>
+      </div>
     </section>
 
     <!-- Step 3: Identity -->
@@ -117,7 +142,7 @@
       </header>
       <dl class="kv setup-review" data-setup-review>
         <dt>Generation</dt><dd data-review="generation">—</dd>
-        <dt>Cameras</dt><dd data-review="cameras">—</dd>
+        <dt data-review-label="cameras">Cameras</dt><dd data-review="cameras">—</dd>
         <dt>Device name</dt><dd data-review="name">—</dd>
         <dt>Group</dt><dd data-review="group">—</dd>
         <dt>Site</dt><dd data-review="site">—</dd>
@@ -139,5 +164,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/device-setup-wizard.js?v=5"></script>
+<script src="/static/js/device-setup-wizard.js?v=7"></script>
 {% endblock %}

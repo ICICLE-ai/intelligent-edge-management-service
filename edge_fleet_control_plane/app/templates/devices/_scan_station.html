@@ -1,0 +1,69 @@
+<section class="section card" id="scan-station">
+  <header class="card__head">
+    <h2>Scan station</h2>
+    <span class="muted small">This device runs the scan service. The capture station turns the table and records; scans are started from the Scans page.</span>
+  </header>
+  <div class="card__body">
+    <div class="grid grid-2">
+      <div>
+        <dl class="kv">
+          <dt>Capture station</dt><dd class="mono small">{{ station.capture_host }}</dd>
+          <dt>SSH folder</dt><dd class="mono small">{{ station.ssh_dir }}</dd>
+          <dt>Scan token</dt>
+          <dd class="small">
+            <details>
+              <summary class="mono">{{ station.token[:4] }}••••••••</summary>
+              <code class="tiny" data-copy="{{ station.token }}" title="Click to copy" style="word-break:break-all">{{ station.token }}</code>
+            </details>
+          </dd>
+          <dt>Scan service</dt>
+          <dd class="small">
+            {% if scan_status %}
+              {% if scan_status.reachable %}<span class="badge badge--green">Reachable</span>{% else %}<span class="badge badge--red">Not reachable</span> <span class="text-soft tiny">{{ scan_status.error }}</span>{% endif %}
+              <span class="text-mute tiny">· {{ scan_status.reported_at | relative }}</span>
+            {% elif active_deployment %}
+              <span class="text-soft">Waiting for the first report from the agent…</span>
+            {% else %}
+              <span class="text-soft">Not running. Start it below.</span>
+            {% endif %}
+          </dd>
+        </dl>
+        <div class="row" style="margin-top:14px">
+          <a class="btn btn--success" href="/scans/{{ device.device_uid }}">Open Scans</a>
+        </div>
+
+        <form method="post" action="/devices/{{ device.device_uid }}/scan-station" class="form" data-loading style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line)">
+          <div class="field">
+            <label class="field__label" for="station_capture_host">Capture station SSH host</label>
+            <input class="input" id="station_capture_host" name="capture_host" value="{{ station.capture_host }}" required />
+          </div>
+          <div class="field">
+            <label class="field__label" for="station_ssh_dir">SSH folder on this station</label>
+            <input class="input" id="station_ssh_dir" name="ssh_dir" value="{{ station.ssh_dir }}" required />
+            <div class="field__hint">The <code>.ssh</code> folder of the user who can already <code>ssh {{ station.capture_host }}</code> without a password.</div>
+          </div>
+          <div class="field">
+            <label class="field__label" for="station_scan_token">Replace scan token <span class="text-mute">(optional)</span></label>
+            <input class="input" id="station_scan_token" name="scan_token" autocomplete="off" placeholder="Leave blank to keep the current token" />
+          </div>
+          <label class="small text-soft"><input type="checkbox" name="new_token" value="1"> Generate a new token</label>
+          <div class="row" style="margin-top:10px">
+            <button class="btn btn--ghost" data-loading-text="Saving…">Save station settings</button>
+          </div>
+          <p class="tiny text-mute">A new token or capture host takes effect the next time the scan service is deployed.</p>
+        </form>
+      </div>
+
+      <div>
+        <h3 class="small" style="margin:0 0 8px">Before starting the scan service</h3>
+        <ol class="small text-soft" style="padding-left:18px;line-height:1.6;margin:0">
+          <li>Stop the job server and worker if they were started by hand (<code>./spark.sh stop</code>), so port 8800 is free. The scan service refuses to start while something else is on it.</li>
+          <li>Turn off their start at boot: comment out the <code>@reboot … spark.sh start</code> line with <code>crontab -e</code>. Otherwise a reboot starts them again and they take port 8800 back. Don't use the DGX Start button in the lab GUI's Rig tab either.</li>
+          <li>Check that <code>ssh {{ station.capture_host }} hostname</code> works without a password for the user whose SSH folder is set here.</li>
+          <li>The capture station's <code>config.toml</code> must point at this station (<code>[server] url = "http://THIS_STATION_IP:8800"</code>) with the scan token above. If you pasted its existing token, nothing changes there.</li>
+        </ol>
+        <p class="tiny text-mute" style="margin-top:10px">The data folder <code>/srv/scanbot</code> is created on first start. GPU and disk checks run when you deploy.</p>
+      </div>
+    </div>
+  </div>
+</section>

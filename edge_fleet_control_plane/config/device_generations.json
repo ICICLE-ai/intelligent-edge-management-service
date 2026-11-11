@@ -88,5 +88,21 @@
     "storage_gb": 512,
     "description": "Dell PowerEdge x86_64 server with NVIDIA GPU and NVIDIA Container Toolkit.",
     "is_active": true
+  },
+  {
+    "generation_uid": "dgx-spark-gb10-v1",
+    "display_name": "DGX Spark (GB10)",
+    "vendor": "NVIDIA",
+    "device_family": "DGX",
+    "hardware_type": "dgx-spark",
+    "architecture": "aarch64",
+    "cuda_supported": true,
+    "default_runtime": "nvidia",
+    "cpu_cores": 20,
+    "memory_mb": 131072,
+    "storage_gb": 1024,
+    "description": "NVIDIA DGX Spark desktop (GB10, 128 GB unified memory, CUDA 13). Set up as a turntable scan station: it queues scans and builds the 3D models, and a capture station on the same network turns the table and records.",
+    "setup_flow": "scan-station",
+    "is_active": true
   }
 ]

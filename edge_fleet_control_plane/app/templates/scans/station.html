@@ -1,0 +1,94 @@
+{% extends "_layout/base.html" %}
+{% block title %}Scans · {{ device.device_name }} · ICICLE Edge{% endblock %}
+{% block topbar_title %}Turntable Scans / {{ device.device_name }}{% endblock %}
+
+{% block content %}
+{% set svc = data.service %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title">
+      <h1 class="title-gradient">{{ device.device_name }}</h1>
+      <span class="badge {{ 'badge--green' if svc.ready else 'badge--amber' }}" data-scan-service-badge>{{ svc.headline }}</span>
+    </div>
+    <div class="page-header__subtitle">
+      Scan station · capture station <code>{{ device.capabilities.scan_station.capture_host }}</code>
+      · <span data-scan-service-detail>{{ svc.detail }}</span>
+    </div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn btn--outline" href="/devices/{{ device.device_uid }}">Station settings</a>
+  </div>
+</div>
+
+<div class="grid grid-2" style="align-items:start">
+  <section class="card">
+    <header class="card__head">
+      <h2>New scan</h2>
+      <span class="muted small">The turntable spins the object while the GoPro films it. The GPU then picks the sharpest frames and builds the 3D model.</span>
+    </header>
+    <div class="card__body">
+      <form method="post" action="/scans/{{ device.device_uid }}/submit" class="form" data-loading data-scan-submit>
+        <div class="field">
+          <label class="field__label" for="object_name">Object name</label>
+          <input class="input" id="object_name" name="object_name" maxlength="60" placeholder="e.g. succulent pot" required />
+          <div class="field__hint">A short name. It becomes part of the scan id.</div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label" for="rotations">Rotations</label>
+            <input class="input" id="rotations" name="rotations" type="number" min="0.25" max="5" step="0.25" value="1" required />
+            <div class="field__hint">Full turns while filming. 1 is usually enough.</div>
+          </div>
+          <div class="field">
+            <label class="field__label" for="iterations">Training iterations</label>
+            <input class="input" id="iterations" name="iterations" type="number" min="1000" max="100000" step="1000" value="{{ default_iterations }}" required data-scan-iterations />
+            <div class="field__hint">More is sharper but slower.</div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="target_fps">Frames per second kept</label>
+          <input class="input" id="target_fps" name="target_fps" type="number" min="1" max="15" step="0.5" value="5" required />
+          <div class="field__hint">5 gives about 100 frames for one turn.</div>
+        </div>
+        <fieldset class="field" style="border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+          <legend class="field__label" style="padding:0 6px">Check the rig before every scan</legend>
+          {% for key, text in checklist %}
+          <label class="small" style="display:block;margin:4px 0"><input type="checkbox" name="checklist" value="{{ key }}" data-scan-check> {{ text }}</label>
+          {% endfor %}
+        </fieldset>
+        <p class="tiny text-mute" data-scan-estimate></p>
+        <div class="row">
+          <button class="btn btn--success" data-scan-submit-btn data-loading-text="Sending…" {% if not svc.ready %}disabled{% endif %}>Start scan</button>
+          <span class="tiny text-mute" data-scan-submit-hint></span>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <header class="card__head">
+      <h2>How it works</h2>
+    </header>
+    <div class="card__body small text-soft" style="line-height:1.6">
+      <ol style="padding-left:18px;margin:0">
+        <li><b>Filming</b>: the capture station turns the table and records (under a minute).</li>
+        <li><b>Picking frames</b>: it keeps the sharpest frames, then this station copies them.</li>
+        <li><b>Building the model</b>: masks, camera positions, then NeRF training (about 21 minutes for 30,000 iterations).</li>
+        <li><b>Done</b>: preview videos appear here. The full results stay on the station until you fetch them.</li>
+      </ol>
+      <p class="tiny text-mute" style="margin-top:10px">The turntable films one scan at a time. If scans are waiting, make sure the right object is on the table when its turn comes.</p>
+    </div>
+  </section>
+</div>
+
+<section class="section">
+  <div data-scan-pending></div>
+  <div data-scan-list data-url="/scans/{{ device.device_uid }}/jobs.json" data-device="{{ device.device_uid }}"></div>
+</section>
+
+<script type="application/json" id="scan-initial">{{ data | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/scans.js?v=1"></script>
+{% endblock %}

@@ -347,5 +347,56 @@
     "compatibility": [
       {"generation_uid": "jetson-orin-nano-v1", "min_memory_mb": 4096, "min_storage_gb": 4, "requires_cuda": true, "notes": "Paste a model URL at deploy time. Saved as model.pt. JetPack 6 image."}
     ]
+  },
+  {
+    "model_card_uid": "mc_seed_scanbot_dgx_recon",
+    "app_id": "app_seed_scanbot_dgx_recon",
+    "visibility": "public",
+    "slug": "scanbot-dgx-recon",
+    "display_name": "Scanbot reconstruction service (DGX Spark)",
+    "version": "0.1.1",
+    "task_type": "3D reconstruction",
+    "framework": "nerfstudio",
+    "app_kind": "scanbot",
+    "description": "Turntable scan service for a DGX Spark scan station. One long-running container queues scans and builds a NeRF for each one (masks, COLMAP, nerfacto). The capture station's agent turns the table and records; this service copies the frames from it over SSH. Submit and follow scans on the station's Scans page. The scan token and capture host come from the station's settings.",
+    "license": "private",
+    "tags": ["3d-reconstruction", "nerf", "scanbot", "dgx-spark"],
+    "status": "PUBLISHED",
+    "raw_docker_command": "docker run -d --name scanbot_dgx_recon --restart unless-stopped --runtime nvidia --gpus all --network host --ipc host -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video -e SCANBOT_TOKEN=<station scan token> -e SCANBOT_PULL_HOST=<capture host> -e SCANBOT_PORT=8800 -e MAX_ITERS=30000 -v /srv/scanbot:/home/scanbot/scanbot -v <station SSH folder>:/home/scanbot/.ssh-mount:ro habg21/scanbot-dgx-recon:0.1.1",
+    "artifact": {
+      "filename": "scanbot-service.txt",
+      "container_path": "/opt/scanbot/scanbot-service.txt",
+      "source_type": "none",
+      "content_type": "text/plain",
+      "notes": "No weights file. The pipeline is in the image. The agent writes a local marker instead of downloading."
+    },
+    "container": {
+      "image_repository": "habg21/scanbot-dgx-recon",
+      "image_tag": "0.1.1",
+      "container_name": "scanbot_dgx_recon",
+      "pull_policy": "if_not_present",
+      "remove_after_exit": false,
+      "restart_policy": "unless-stopped",
+      "runtime": "nvidia",
+      "gpus": "all",
+      "network_mode": "host",
+      "ipc_mode": "host",
+      "privileged": false,
+      "env": {
+        "NVIDIA_DRIVER_CAPABILITIES": "compute,utility,video",
+        "SCANBOT_PORT": "8800",
+        "SCANBOT_TRANSFER_MODE": "pull",
+        "MAX_ITERS": "30000",
+        "RECON_TIMEOUT_H": "6"
+      },
+      "mounts": [
+        {"style": "volume", "type": "bind", "source": "/srv/scanbot", "target": "/home/scanbot/scanbot", "mode": "rw"},
+        {"style": "volume", "type": "bind", "source": "/srv/scanbot-ssh", "target": "/home/scanbot/.ssh-mount", "mode": "ro"}
+      ],
+      "docker_args": []
+    },
+    "compatibility": [
+      {"generation_uid": "dgx-spark-gb10-v1", "min_memory_mb": 16384, "min_storage_gb": 32, "requires_cuda": true, "notes": "linux/arm64 image. CUDA 13, GB10 sm 12.1. NVIDIA Container Toolkit required. The device must be set up as a scan station. One long-running container, not one container per scan."}
+    ]
   }
 ]

@@ -18,6 +18,9 @@ from app.services import event_service
 
 log = get_logger("heartbeat")
 
+# Scan commands older than this are not redelivered; see list_unacked_scan_payloads.
+SCAN_COMMAND_TTL_S = 600
+
 
 def _should_persist_history(device_uid: str, mode: str, sample_seconds: int) -> bool:
     if mode == "none":
@@ -84,6 +87,8 @@ def record_heartbeat(payload: Dict[str, Any]) -> Dict[str, Any]:
     pending = []
     try:
         pending = commands_repo.list_unacked_payloads_for_device(device_uid)
+        since = (datetime.now(timezone.utc) - timedelta(seconds=SCAN_COMMAND_TTL_S)).isoformat()
+        pending += commands_repo.list_unacked_scan_payloads(device_uid, since_iso=since)
     except Exception:
         log.exception("pending-command lookup failed for %s", device_uid)
     return {

@@ -1,0 +1,50 @@
+{% extends "_layout/base.html" %}
+{% block title %}Turntable Scans · ICICLE Edge{% endblock %}
+{% block topbar_title %}Turntable Scans{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-header__title"><h1 class="title-gradient">Turntable Scans</h1></div>
+    <div class="page-header__subtitle">Scan stations film an object on a turntable and build a 3D model of it. Pick a station to start a scan.</div>
+  </div>
+  <div class="page-header__actions">
+    <a class="btn btn--outline" href="/devices/setup">Set Up a Scan Station</a>
+  </div>
+</div>
+
+{% if stations %}
+<div class="card">
+  <table class="table">
+    <thead><tr>
+      <th>Station</th><th>Capture station</th><th>Scan service</th>
+      <th class="right">In progress</th><th class="right">Done</th><th class="right">Failed</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for s in stations %}
+      <tr>
+        <td>
+          <a href="/scans/{{ s.device.device_uid }}"><b>{{ s.device.device_name }}</b></a>
+          <div class="tiny text-mute">{{ s.device.generation_name }}{% if s.device.site_name %} · {{ s.device.site_name }}{% endif %}</div>
+        </td>
+        <td class="mono small">{{ s.capture_host }}</td>
+        <td>
+          <span class="badge {{ 'badge--green' if s.service.ready else 'badge--amber' }}">{{ s.service.headline }}</span>
+        </td>
+        <td class="right">{{ s.active }}</td>
+        <td class="right">{{ s.done }}</td>
+        <td class="right">{{ s.failed }}</td>
+        <td class="right"><a class="btn btn--sm" href="/scans/{{ s.device.device_uid }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <h3>No scan stations yet</h3>
+  <p>Set up a DGX Spark as a scan station. You'll be asked for the capture station's SSH host instead of cameras.</p>
+  <a class="btn" href="/devices/setup">Set Up a Scan Station</a>
+</div>
+{% endif %}
+{% endblock %}

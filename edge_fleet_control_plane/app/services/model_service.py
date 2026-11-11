@@ -35,7 +35,7 @@ _VALID_MOUNT_TYPES = {"bind", "volume", "tmpfs"}
 _VALID_MOUNT_MODES = {None, "", "ro", "rw"}
 _VALID_PORT_PROTO = {"tcp", "udp"}
 _VALID_NETWORK_MODES = {None, "", "bridge", "host", "none"}
-_VALID_SOURCE_TYPES = {"patra", "url"}
+_VALID_SOURCE_TYPES = {"patra", "url", "none"}
 # Apps with this tag ask the person deploying for a weights URL. The portal
 # puts that URL on the deploy command instead of the card's artifact.
 RUNTIME_MODEL_URL_TAG = "runtime-model-url"
@@ -537,7 +537,7 @@ def _validate_payload(p: dict, *, slug_required: bool = False) -> None:
     if not a.get("container_path"):
         errors.append("Artifact container path is required.")
     if a.get("source_type") not in _VALID_SOURCE_TYPES:
-        errors.append("Artifact source must be 'patra' or 'url'.")
+        errors.append("Artifact source must be 'patra', 'url', or 'none'.")
     if a.get("source_type") == "patra" and not a.get("patra_model_card_uuid"):
         errors.append("Patra source requires a Patra model-card UUID.")
     if a.get("source_type") == "url" and not a.get("download_url"):

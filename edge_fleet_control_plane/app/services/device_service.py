@@ -24,6 +24,9 @@ def register(
     camera_bus: Optional[str] = None,
     camera_count: Optional[int] = None,
     camera_indices: Optional[str] = None,
+    capture_host: Optional[str] = None,
+    scan_token: Optional[str] = None,
+    ssh_dir: Optional[str] = None,
 ) -> dict:
     generation = gen_repo.get(generation_uid)
     if not generation or not generation.get("is_active"):
@@ -31,12 +34,17 @@ def register(
     if group_uid:
         if not groups_repo.get(group_uid, owner):
             raise ValidationError("Invalid device group for this owner.")
-    count = max(1, min(16, int(camera_count or 1)))
-    caps = device_capabilities.validate_form(
-        camera_bus=camera_bus or "csi",
-        camera_count=count,
-        camera_indices=camera_indices or "",
-    )
+    if generation.get("setup_flow") == "scan-station":
+        caps = device_capabilities.scan_station_caps(
+            capture_host=capture_host or "", token=scan_token or "", ssh_dir=ssh_dir or "",
+        )
+    else:
+        count = max(1, min(16, int(camera_count or 1)))
+        caps = device_capabilities.validate_form(
+            camera_bus=camera_bus or "csi",
+            camera_count=count,
+            camera_indices=camera_indices or "",
+        )
     caps_json = device_capabilities.to_json(caps)
     device_uid = gen_uid("dev")
     devices_repo.create(
@@ -127,6 +135,13 @@ def update_generation(device_uid: str, owner: str, generation_uid: str) -> dict:
     if generation_uid == device["generation_uid"]:
         return device
     devices_repo.update_generation(device_uid, owner, generation_uid)
+    wants_station = generation.get("setup_flow") == "scan-station"
+    if wants_station != bool(device_capabilities.scan_station(device)):
+        caps = (
+            device_capabilities.scan_station_caps(capture_host="", token="")
+            if wants_station else device_capabilities.defaults_for_bus("csi")
+        )
+        devices_repo.update_capabilities(device_uid, owner, device_capabilities.to_json(caps))
     event_service.record(
         "DEVICE_GENERATION_CHANGED",
         "Device generation changed to %s" % generation["display_name"],
@@ -220,7 +235,9 @@ def update_capabilities(
     camera_count: int,
     camera_indices: str,
 ) -> dict:
-    get(device_uid, owner)
+    device = get(device_uid, owner)
+    if device_capabilities.scan_station(device):
+        raise ValidationError("This device is a scan station; it has no cameras to configure.")
     caps = device_capabilities.validate_form(
         camera_bus=camera_bus,
         camera_count=camera_count,
@@ -239,6 +256,43 @@ def update_capabilities(
     return get(device_uid, owner)
 
 
+def update_scan_station(
+    device_uid: str,
+    owner: str,
+    *,
+    capture_host: str,
+    scan_token: str,
+    ssh_dir: str = "",
+    new_token: bool = False,
+) -> dict:
+    device = get(device_uid, owner)
+    current = device_capabilities.scan_station(device)
+    if not current:
+        raise ValidationError("This device is not set up as a scan station.")
+    token = "" if new_token else (scan_token.strip() or current.get("token") or "")
+    caps = device_capabilities.scan_station_caps(
+        capture_host=capture_host, token=token, ssh_dir=ssh_dir or current.get("ssh_dir") or "",
+    )
+    devices_repo.update_capabilities(device_uid, owner, device_capabilities.to_json(caps))
+    changed = []
+    if caps["scan_station"]["capture_host"] != current.get("capture_host"):
+        changed.append("capture host %s" % caps["scan_station"]["capture_host"])
+    if caps["scan_station"]["ssh_dir"] != current.get("ssh_dir"):
+        changed.append("SSH folder %s" % caps["scan_station"]["ssh_dir"])
+    if caps["scan_station"]["token"] != current.get("token"):
+        changed.append("scan token")
+    event_service.record(
+        "SCAN_STATION_UPDATED",
+        "Scan station settings updated (%s)" % (", ".join(changed) or "no change"),
+        owner=owner,
+        device_uid=device_uid,
+        payload={"capture_host": caps["scan_station"]["capture_host"],
+                 "ssh_dir": caps["scan_station"]["ssh_dir"],
+                 "token_changed": "scan token" in changed},
+    )
+    return get(device_uid, owner)
+
+
 def setup_readiness(
     device: dict,
     *,
@@ -251,14 +305,16 @@ def setup_readiness(
     enrolled = bool(enrollment and enrollment.get("used_at"))
     online = status in {"ONLINE", "RUNNING", "ENROLLED"}
     installer_done = bool(enrollment and enrollment.get("installer_downloaded_at"))
-    steps = [
-        {
-            "id": "registered",
-            "label": "Device registered",
-            "detail": device.get("device_name") or device.get("device_uid"),
+    station = caps.get("scan_station")
+    if station:
+        hardware_step = {
+            "id": "hardware",
+            "label": "Scan station settings saved",
+            "detail": "Capture station: %s" % station.get("capture_host"),
             "done": True,
-        },
-        {
+        }
+    else:
+        hardware_step = {
             "id": "hardware",
             "label": "Hardware profile saved",
             "detail": "%s · %d camera(s)" % (
@@ -266,7 +322,15 @@ def setup_readiness(
                 caps.get("camera_count") or 1,
             ),
             "done": True,
+        }
+    steps = [
+        {
+            "id": "registered",
+            "label": "Device registered",
+            "detail": device.get("device_name") or device.get("device_uid"),
+            "done": True,
         },
+        hardware_step,
         {
             "id": "installer",
             "label": "Agent installer downloaded",
@@ -287,7 +351,7 @@ def setup_readiness(
         },
         {
             "id": "apps",
-            "label": "Deploy apps",
+            "label": "Deploy the scan service" if station else "Deploy apps",
             "detail": (
                 "%d compatible app(s) in catalog — available once the device is online"
                 % compatible_app_count

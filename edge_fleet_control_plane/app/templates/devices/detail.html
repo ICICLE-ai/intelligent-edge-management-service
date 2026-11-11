@@ -52,10 +52,20 @@
   </div>
 </div>
 
+{% set station = (device.capabilities or {}).get('scan_station') %}
+{% if station %}
+{% include "devices/_scan_station.html" %}
+{% endif %}
+
 <section class="section card">
   <header class="card__head">
+    {% if station %}
+    <h2>Scan service</h2>
+    <span class="muted small">Starts the job server and the reconstruction worker on this station. It keeps running between scans.</span>
+    {% else %}
     <h2>Run an app</h2>
     <span class="muted small">Choose from your apps or public apps from other users.</span>
+    {% endif %}
   </header>
   <div class="card__body">
     {% if my_apps or other_apps %}
@@ -75,12 +85,12 @@
           {% include "_partials/runtime_model_url.html" %}
         </div>
         <div class="row">
-          <button class="btn btn--success" data-loading-text="Dispatching…">Deploy to this device</button>
+          <button class="btn btn--success" data-loading-text="Dispatching…">{{ 'Start the scan service' if station else 'Deploy to this device' }}</button>
         </div>
       </form>
     {% else %}
       <div class="empty">
-        <h3>No compatible apps</h3>
+        <h3>{{ 'No scan service app' if station else 'No compatible apps' }}</h3>
         <p>Publish an app and mark it compatible with <code>{{ device.generation_name }}</code>, or browse public apps from others.</p>
         <a class="btn" href="/apps/new">Publish App</a>
       </div>
@@ -88,6 +98,7 @@
   </div>
 </section>
 
+{% if not station %}
 {% if active_deployment and inference_streams and inference_streams.enabled %}
 {% include "_partials/inference_stream_grid.html" %}
 {% endif %}
@@ -191,6 +202,7 @@
     </form>
   </div>
 </section>
+{% endif %}
 
 <div class="grid grid-2">
   {% if not show_setup_panel %}
@@ -257,7 +269,7 @@ sudo ./install.sh</pre>
               </option>
             {% endfor %}
           </select>
-          <div class="field__hint">Controls which apps appear in the deploy list. Must match your Jetson hardware and JetPack.</div>
+          <div class="field__hint">Controls which apps appear in the deploy list and whether this device is set up for cameras or as a scan station.</div>
         </div>
         <div class="row">
           <button class="btn btn--ghost" data-loading-text="Saving…">Update generation</button>

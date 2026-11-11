@@ -244,6 +244,7 @@
         <div class="row">
           <label class="checkbox"><input type="radio" name="artifact_source_type" value="patra" {% if (val('artifact_source_type') or 'patra') == 'patra' %}checked{% endif %}> Patra (resolved at deploy time)</label>
           <label class="checkbox"><input type="radio" name="artifact_source_type" value="url" {% if val('artifact_source_type') == 'url' %}checked{% endif %}> Direct download URL</label>
+          <label class="checkbox"><input type="radio" name="artifact_source_type" value="none" {% if val('artifact_source_type') == 'none' %}checked{% endif %}> No weights file</label>
         </div>
       </div>
       <div class="field-grid">

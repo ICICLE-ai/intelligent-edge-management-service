@@ -51,7 +51,21 @@
   <div class="stat stat--slate"><div class="stat__label">Commands</div><div class="stat__value">{{ d.commands | length }}</div></div>
 </div>
 
+{% if (d.card or {}).get('app_kind') == 'scanbot' %}
+<section class="section card">
+  <header class="card__head">
+    <h2>Scan service</h2>
+    <span class="muted small">This deployment runs the turntable scan service. Start and follow scans on the station's Scans page.</span>
+  </header>
+  <div class="card__body row">
+    {% for dd in d.devices %}
+    <a class="btn btn--success" href="/scans/{{ dd.device_uid }}">Open Scans · {{ dd.device_name or dd.device_uid }}</a>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
 {% include "_partials/inference_stream_grid.html" %}
+{% endif %}
 
 <section class="card">
   <header class="card__head"><h2>Per-device status</h2></header>

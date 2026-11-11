@@ -32,6 +32,7 @@ from app.routes.web import groups as groups_web
 from app.routes.web import hardware as hardware_web
 from app.routes.web import models as models_web
 from app.routes.web import operations as operations_web
+from app.routes.web import scans as scans_web
 from app.services import heartbeat_service
 from app.services.seed_service import seed_everything
 from app.services import tapis_auth_service
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(models_web.router)
     app.include_router(deployments_web.router)
     app.include_router(operations_web.router)
+    app.include_router(scans_web.router)
 
     # JSON API routes
     app.include_router(public_api.router)

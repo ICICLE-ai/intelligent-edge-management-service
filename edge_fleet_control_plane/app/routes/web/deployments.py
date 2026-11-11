@@ -40,6 +40,8 @@ def deployment_detail(request: Request, deployment_uid: str):
         dep.get("devices") or [],
         card=dep.get("card"),
     )
+    if (dep.get("card") or {}).get("app_kind") == "scanbot":
+        inference_streams = None
     return templates.TemplateResponse(
         "deployments/detail.html",
         {

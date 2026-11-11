@@ -14,9 +14,58 @@ from app.services import (
     event_service,
     heartbeat_service,
     provenance_service,
+    scan_service,
 )
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+
+def _scan_auth(request: Request, device_uid: str) -> None:
+    if not device_uid:
+        raise HTTPException(400, "Missing device_id")
+    try:
+        authenticate_device(request, device_uid)
+    except DomainError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@router.post("/scanbot/report")
+def scanbot_report(request: Request, payload: dict):
+    """Scan station agent: job server reachability plus the current job list."""
+    device_uid = payload.get("device_id") or ""
+    _scan_auth(request, device_uid)
+    try:
+        return scan_service.record_report(device_uid, payload)
+    except DomainError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@router.post("/scanbot/file")
+async def scanbot_file(request: Request, device_id: str, job_id: str, name: str):
+    """One preview video for a finished scan (raw body)."""
+    _scan_auth(request, device_id)
+    body = await request.body()
+    try:
+        return scan_service.store_preview(device_id, job_id, name, body)
+    except DomainError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@router.post("/scanbot/bundle")
+async def scanbot_bundle(request: Request, device_id: str, job_id: str,
+                         offset: int = 0, total: int = 0, final: int = 0, error: str = ""):
+    """One chunk of a result bundle (raw body). ``error`` reports a failed upload instead."""
+    _scan_auth(request, device_id)
+    try:
+        if error:
+            scan_service.bundle_failed(device_id, job_id, error)
+            return {"ok": True}
+        body = await request.body()
+        return scan_service.store_bundle_chunk(
+            device_id, job_id, offset=offset, total=total, final=bool(final), body=body,
+        )
+    except DomainError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
 @router.post("/enroll")

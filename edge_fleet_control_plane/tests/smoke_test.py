@@ -51,6 +51,7 @@ assert r.status_code == 200, r.text
 gens = r.json()
 assert any(g["generation_uid"] == "jetson-orin-nano-v1" for g in gens), gens
 assert any(g["generation_uid"] == "dell-poweredge-gpu-v1" for g in gens), gens
+assert any(g["generation_uid"] == "dgx-spark-gb10-v1" for g in gens), gens
 
 # Seeded model card present and published
 r = client.get("/api/models")

@@ -14,9 +14,11 @@ from app.repositories import events as events_repo
 from app.repositories import generations as gen_repo
 from app.repositories import groups as groups_repo
 from app.repositories import heartbeats as heartbeats_repo
+from app.repositories import scan_jobs as scan_repo
 from app.routes._helpers import form_error, http_error_from_domain, redirect_with_notice
 from app.services import (
     deployment_service,
+    device_capabilities,
     device_service,
     enrollment_service,
     model_service,
@@ -73,6 +75,9 @@ def create_device(
     camera_bus: str = Form("csi"),
     camera_count: int = Form(1),
     camera_indices: str = Form(""),
+    capture_host: str = Form(""),
+    scan_token: str = Form(""),
+    ssh_dir: str = Form(""),
 ):
     owner = current_username(request)
     try:
@@ -86,6 +91,9 @@ def create_device(
             camera_bus=camera_bus or None,
             camera_count=camera_count,
             camera_indices=camera_indices or None,
+            capture_host=capture_host or None,
+            scan_token=scan_token or None,
+            ssh_dir=ssh_dir or None,
         )
     except DomainError as e:
         raise http_error_from_domain(e)
@@ -125,6 +133,10 @@ def device_detail(request: Request, device_uid: str, setup: Optional[str] = None
         compatible_app_count=compat_count,
     )
     show_setup_panel = setup == "1" or not setup_readiness["core_complete"]
+    scan_status = None
+    if device_capabilities.scan_station(device):
+        inference_streams = None
+        scan_status = scan_repo.get_status(device_uid)
     return templates.TemplateResponse(
         "devices/detail.html",
         {
@@ -147,6 +159,7 @@ def device_detail(request: Request, device_uid: str, setup: Optional[str] = None
             "inference_streams": inference_streams,
             "setup_readiness": setup_readiness,
             "show_setup_panel": show_setup_panel,
+            "scan_status": scan_status,
             "inference_stream_title": (
                 "Live feeds · %s" % active_deployment["model_display_name"]
                 if active_deployment else "Inference live stream"
@@ -255,6 +268,33 @@ def update_device_capabilities(
     except DomainError as e:
         raise http_error_from_domain(e)
     return redirect_with_notice(f"/devices/{device_uid}", notice="Hardware setup saved")
+
+
+@router.post("/devices/{device_uid}/scan-station", name="device_scan_station_update")
+def update_scan_station(
+    request: Request,
+    device_uid: str,
+    capture_host: str = Form(""),
+    scan_token: str = Form(""),
+    ssh_dir: str = Form(""),
+    new_token: str = Form(""),
+):
+    owner = current_username(request)
+    try:
+        device_service.update_scan_station(
+            device_uid,
+            owner,
+            capture_host=capture_host,
+            scan_token=scan_token,
+            ssh_dir=ssh_dir,
+            new_token=new_token == "1",
+        )
+    except DomainError as e:
+        return form_error(e, f"/devices/{device_uid}")
+    notice = "Scan station settings saved"
+    if new_token == "1" or scan_token.strip():
+        notice += ". Put the new token in the capture station's config, then redeploy the scan service."
+    return redirect_with_notice(f"/devices/{device_uid}", notice=notice)
 
 
 @router.post("/devices/{device_uid}/generation", name="device_generation_update")

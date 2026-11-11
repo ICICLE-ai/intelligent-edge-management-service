@@ -1,4 +1,4 @@
-// Multi-step device setup wizard — generation → cameras → identity → review.
+// Multi-step device setup wizard — generation → cameras or capture station → identity → review.
 (function () {
   "use strict";
 
@@ -65,6 +65,29 @@
     }
   }
 
+  function selectedFlow(root) {
+    const gen = root.querySelector('input[name="generation_uid"]:checked');
+    return (gen && gen.dataset.setupFlow) || "camera";
+  }
+
+  // Step 2 asks for cameras on camera devices and for the capture station on a scan station.
+  function applyFlow(root) {
+    const flow = selectedFlow(root);
+    root.querySelectorAll("[data-flow-panel]").forEach((panel) => {
+      const on = panel.dataset.flowPanel === flow;
+      panel.hidden = !on;
+      panel.querySelectorAll("input, select").forEach((el) => {
+        if (el.matches("[data-setup-camera-indices]")) return;
+        el.disabled = !on;
+      });
+    });
+    const label = root.querySelector("[data-step2-label]");
+    if (label) label.textContent = flow === "scan-station" ? "Capture station" : "Cameras";
+    const reviewLabel = root.querySelector('[data-review-label="cameras"]');
+    if (reviewLabel) reviewLabel.textContent = flow === "scan-station" ? "Capture station" : "Cameras";
+    if (flow === "camera") updateCameraFields(root);
+  }
+
   function updateReview(root) {
     const review = root.querySelector("[data-setup-review]");
     if (!review) return;
@@ -91,6 +114,14 @@
       if (el) el.textContent = val || "—";
     };
 
+    if (selectedFlow(root) === "scan-station") {
+      const host = root.querySelector("#capture_host");
+      const token = root.querySelector("#scan_token");
+      const ssh = root.querySelector("#ssh_dir");
+      camText = "SSH host " + ((host && host.value.trim()) || "jetson") + " · "
+        + (token && token.value.trim() ? "token pasted" : "new token generated") + " · "
+        + "keys from " + ((ssh && ssh.value.trim()) || "/srv/scanbot-ssh");
+    }
     set("generation", genName ? genName.textContent.trim() : "—");
     set("cameras", camText);
     set("name", name ? name.value.trim() : "—");
@@ -115,7 +146,7 @@
     });
 
     if (n === TOTAL_STEPS) updateReview(root);
-    if (n === 2) updateCameraFields(root);
+    if (n === 2) applyFlow(root);
   }
 
   function validateStep(root, step) {
@@ -163,6 +194,7 @@
           bus.value = "rtsp";
           updateCameraFields(form);
         }
+        applyFlow(form);
       });
     });
 

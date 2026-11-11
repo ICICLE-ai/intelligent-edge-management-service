@@ -28,7 +28,21 @@ def get(generation_uid: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+SETUP_FLOWS = ("camera", "scan-station")
+
+
 def upsert(record: dict) -> None:
+    _upsert_row(record)
+    # Admin edits do not send setup_flow; only overwrite it when the record has one.
+    flow = record.get("setup_flow")
+    if flow in SETUP_FLOWS:
+        execute(
+            "UPDATE device_generations SET setup_flow = ? WHERE generation_uid = ?",
+            (flow, record["generation_uid"]),
+        )
+
+
+def _upsert_row(record: dict) -> None:
     ts = now_iso()
     existing = get(record["generation_uid"])
     if existing:

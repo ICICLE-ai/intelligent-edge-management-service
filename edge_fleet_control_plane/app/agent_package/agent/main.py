@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.5.1"
+AGENT_VERSION = "edge-agent-v2.7.0"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -444,7 +444,8 @@ def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[s
              operation: str, status: str, container_id: Optional[str] = None,
              container_name: Optional[str] = None, error: Optional[str] = None,
              timings: Optional[Dict[str, Any]] = None,
-             provenance: Optional[Dict[str, Any]] = None) -> None:
+             provenance: Optional[Dict[str, Any]] = None,
+             result: Optional[Dict[str, Any]] = None) -> None:
     url = cfg["portal"]["base_url"].rstrip("/") + "/api/agent/ack"
     payload = {
         "device_id": cfg["device_id"],
@@ -461,6 +462,8 @@ def send_ack(cfg: Dict[str, Any], *, request_id: str, deployment_uid: Optional[s
         payload["timings"] = dict(timings)
     if provenance is not None:
         payload["provenance"] = dict(provenance)
+    if result is not None:
+        payload["result"] = dict(result)
     if not post_json(url, payload, api_key=load_api_key()):
         log(f"ack not accepted by portal: {operation} → {status} (request_id={request_id})")
 
@@ -489,6 +492,8 @@ def resolve_patra_url(cfg: Dict[str, Any], patra_uuid: str) -> str:
 def resolve_artifact_url(cfg: Dict[str, Any], artifact: Dict[str, Any]) -> str:
     """Pick the best download URL for an artifact descriptor."""
     source_type = (artifact.get("source_type") or "url").lower()
+    if source_type == "none":
+        raise RuntimeError("source_type=none has no download URL")
     patra_uuid = artifact.get("patra_model_card_uuid")
     if source_type == "patra":
         if not patra_uuid:
@@ -905,6 +910,33 @@ def _run_container(payload: Dict[str, Any], dpath: Path, artifact_path: Path,
     return container_id
 
 
+_SCANBOT_DATA_TARGET = "/home/scanbot/scanbot"
+_SCANBOT_SSH_TARGET = "/home/scanbot/.ssh-mount"
+
+
+def _prepare_scanbot_host(payload: Dict[str, Any], cname: str) -> None:
+    """Scan service only: create its data folder, check the SSH folder, and make sure the port is free."""
+    if (payload.get("model") or {}).get("app_kind") != "scanbot":
+        return
+    for m in (payload.get("runtime") or {}).get("mounts") or []:
+        target = (m.get("target") or "").rstrip("/")
+        source = m.get("source") or ""
+        if target == _SCANBOT_DATA_TARGET and source.startswith("/"):
+            Path(source).mkdir(parents=True, exist_ok=True)
+        elif target == _SCANBOT_SSH_TARGET and not Path(source).is_dir():
+            raise RuntimeError(
+                "SSH folder %s does not exist on this station. Set the right folder in the "
+                "station settings on the portal, then start the scan service again." % source
+            )
+    subprocess.run(["docker", "rm", "-f", cname], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    port = int(_payload_env(payload).get("SCANBOT_PORT") or 8800)
+    if _tcp_open("127.0.0.1", port, timeout_s=1.0):
+        raise RuntimeError(
+            "Port %d on this station is already in use, probably by a job server started by hand. "
+            "Stop it, then start the scan service again." % port
+        )
+
+
 def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], *,
                                   request_id: str, operation: str,
                                   skip_download: bool = False,
@@ -937,7 +969,13 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
     artifact_path = model_dir / artifact["filename"]
 
     try:
-        if skip_download and artifact_path.exists() and artifact_path.stat().st_size > 0:
+        if (artifact.get("source_type") or "").lower() == "none":
+            # Service images such as Scanbot carry the pipeline in the container.
+            # There is no weights file to fetch.
+            artifact_path.write_text("This service has no weights file.\n")
+            timings["artifact_cached"] = True
+            log(f"no artifact download for {artifact.get('filename')}")
+        elif skip_download and artifact_path.exists() and artifact_path.stat().st_size > 0:
             log(f"reusing cached artifact: {artifact_path}")
             timings["artifact_cached"] = True
         else:
@@ -958,6 +996,7 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             log(f"artifact ready: {artifact_path} ({artifact_path.stat().st_size} bytes)")
         timings["artifact_bytes"] = artifact_path.stat().st_size if artifact_path.exists() else None
 
+        _prepare_scanbot_host(payload, cname)
         validate_bind_mounts(payload, dpath, artifact_path)
 
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
@@ -1500,6 +1539,325 @@ _command_lock = threading.Lock()
 _active_deployments: Set[str] = set()
 
 
+# ---------------------------------------------------------------------------
+# Scan station: relay to the Scanbot job server
+# ---------------------------------------------------------------------------
+#
+# The scan service container listens on 127.0.0.1:<SCANBOT_PORT> (host network)
+# and is never reached from outside. The portal sends scanbot_* commands; this
+# agent calls the job server, reports the job list back, and uploads preview
+# videos and (on request) the result bundle.
+
+_SCANBOT_OPS = ("scanbot_submit", "scanbot_cancel", "scanbot_retry", "scanbot_fetch_bundle")
+SCANBOT_SYNC_S = 5
+SCANBOT_REPORT_EVERY_S = 60
+SCANBOT_CHUNK_BYTES = 32 * 1024 * 1024
+SCANBOT_PREVIEW_MAX_BYTES = 110 * 1024 * 1024
+_scanbot_wake = threading.Event()
+_scanbot_bundles_busy = set()  # type: Set[str]
+_scanbot_preview_tried = {}  # type: Dict[Tuple[str, str], float]
+
+
+def _payload_env(payload: Dict[str, Any]) -> Dict[str, str]:
+    out = {}
+    for e in (payload.get("runtime") or {}).get("environment") or []:
+        if isinstance(e, dict) and e.get("key"):
+            out[str(e["key"])] = resolve_env_value(e.get("value"))
+    return out
+
+
+def _scanbot_services() -> List[Dict[str, Any]]:
+    """Scan services deployed here and not stopped, newest first."""
+    out = []
+    if not DEPLOYMENTS_DIR.is_dir():
+        return out
+    for d in DEPLOYMENTS_DIR.iterdir():
+        path = d / "deploy_payload.json"
+        if not path.is_file():
+            continue
+        payload = _load_json_if_exists(path) or {}
+        if (payload.get("model") or {}).get("app_kind") != "scanbot":
+            continue
+        state = _load_json_if_exists(d / "state.json") or {}
+        if state.get("desired") == "stopped":
+            continue
+        env = _payload_env(payload)
+        port = int(env.get("SCANBOT_PORT") or 8800)
+        out.append({
+            "deployment_uid": payload.get("deployment_uid") or d.name,
+            "base": "http://127.0.0.1:%d" % port,
+            "token": env.get("SCANBOT_TOKEN") or "",
+            "mtime": path.stat().st_mtime,
+        })
+    out.sort(key=lambda s: s["mtime"], reverse=True)
+    return out
+
+
+def _scanbot_service_for(payload: Dict[str, Any]) -> Dict[str, Any]:
+    services = _scanbot_services()
+    for svc in services:
+        if svc["deployment_uid"] == payload.get("deployment_uid"):
+            return svc
+    if services:
+        return services[0]
+    raise RuntimeError("the scan service is not deployed on this station")
+
+
+def _scanbot_request(svc: Dict[str, Any], method: str, path: str, *,
+                     body: Optional[Dict[str, Any]] = None, timeout: int = 15,
+                     stream: bool = False, headers: Optional[Dict[str, str]] = None):
+    h = {"X-Token": svc["token"]}
+    if headers:
+        h.update(headers)
+    try:
+        return requests.request(method, svc["base"] + path, json=body, headers=h,
+                                timeout=timeout, stream=stream)
+    except requests.ConnectionError:
+        raise RuntimeError("job server is not answering on %s (still starting?)" % svc["base"])
+
+
+def _scanbot_json(svc: Dict[str, Any], method: str, path: str,
+                  body: Optional[Dict[str, Any]] = None) -> Any:
+    resp = _scanbot_request(svc, method, path, body=body)
+    if resp.status_code >= 400:
+        try:
+            msg = resp.json().get("error")
+        except Exception:
+            msg = resp.text[:200]
+        if resp.status_code == 401:
+            msg = "the job server rejected the scan token"
+        raise RuntimeError("job server %s on %s: %s" % (resp.status_code, path, msg))
+    if resp.status_code == 204 or not resp.content:
+        return None
+    return resp.json()
+
+
+def _scanbot_submit(svc: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    request_id = payload.get("request_id")
+    # A redelivered submit must not film the object twice.
+    for job in _scanbot_json(svc, "GET", "/jobs") or []:
+        if request_id and job.get("iems_request_id") == request_id:
+            return {"job_id": job["id"]}
+    spec = payload.get("scan") or {}
+    if not isinstance(spec, dict) or not spec.get("object"):
+        raise RuntimeError("scan settings are missing")
+    job = _scanbot_json(svc, "POST", "/jobs", spec)
+    try:
+        _scanbot_json(svc, "POST", "/jobs/%s" % job["id"], {"iems_request_id": request_id})
+    except Exception as e:
+        log("scanbot: could not tag %s with its request id: %s" % (job["id"], e))
+    log("scanbot: queued %s" % job["id"])
+    return {"job_id": job["id"]}
+
+
+def _read_up_to(raw: Any, n: int) -> bytes:
+    parts = []
+    have = 0
+    while have < n:
+        chunk = raw.read(min(1 << 20, n - have))
+        if not chunk:
+            break
+        parts.append(chunk)
+        have += len(chunk)
+    return b"".join(parts)
+
+
+def _post_bytes(cfg: Dict[str, Any], path: str, params: Dict[str, Any], data: bytes,
+                *, timeout: int = 300, retries: int = 3) -> Optional[Dict[str, Any]]:
+    url = cfg["portal"]["base_url"].rstrip("/") + path
+    headers = _portal_headers({"Content-Type": "application/octet-stream"})
+    api_key = load_api_key()
+    if api_key:
+        headers["Authorization"] = "Bearer %s" % api_key
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.post(url, params=params, data=data, headers=headers, timeout=timeout)
+            if resp.status_code < 400:
+                return resp.json()
+            log("upload %s rejected (%s): %s" % (path, resp.status_code, resp.text[:300]))
+            if resp.status_code in (401, 403, 404, 413, 422):
+                return None
+        except Exception as e:
+            log("upload %s failed (attempt %d/%d): %s" % (path, attempt, retries, e))
+        if attempt < retries:
+            time.sleep(min(5 * attempt, 20))
+    return None
+
+
+def _scanbot_upload_bundle(cfg: Dict[str, Any], svc: Dict[str, Any], job_id: str) -> None:
+    params = {"device_id": cfg["device_id"], "job_id": job_id}
+    offset = 0
+    total = None
+    restarts = 0
+    while True:
+        headers = {"Range": "bytes=%d-" % offset} if offset else None
+        resp = _scanbot_request(svc, "GET", "/jobs/%s/bundle" % job_id, stream=True,
+                                timeout=60, headers=headers)
+        if resp.status_code >= 400:
+            raise RuntimeError("job server has no bundle for %s (%s)" % (job_id, resp.status_code))
+        if total is None:
+            total = offset + int(resp.headers.get("Content-Length") or 0)
+            log("scanbot: uploading bundle %s (%d MB)" % (job_id, total // (1 << 20)))
+        resynced = False
+        try:
+            while offset < total:
+                chunk = _read_up_to(resp.raw, SCANBOT_CHUNK_BYTES)
+                if not chunk:
+                    raise RuntimeError("bundle stream ended at %d of %d bytes" % (offset, total))
+                final = offset + len(chunk) >= total
+                body = _post_bytes(cfg, "/api/agent/scanbot/bundle",
+                                   dict(params, offset=offset, total=total, final=int(final)), chunk)
+                if body is None:
+                    raise RuntimeError("portal did not accept the upload")
+                if not body.get("ok"):
+                    offset = int(body.get("bytes") or 0)
+                    resynced = True
+                    break
+                offset = int(body.get("bytes") or offset + len(chunk))
+            if not resynced:
+                return
+        finally:
+            resp.close()
+        restarts += 1
+        if restarts > 5:
+            raise RuntimeError("upload kept losing its place; giving up")
+
+
+def _scanbot_fetch_bundle(cfg: Dict[str, Any], svc: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    job_id = payload.get("job_id") or ""
+    if job_id in _scanbot_bundles_busy:
+        log("scanbot: bundle upload for %s already running" % job_id)
+        return
+    _scanbot_bundles_busy.add(job_id)
+    common = dict(request_id=payload.get("request_id", ""), deployment_uid=payload.get("deployment_uid"),
+                  operation="scanbot_fetch_bundle")
+    send_ack(cfg, status="ACCEPTED", **common)
+    try:
+        _scanbot_upload_bundle(cfg, svc, job_id)
+        send_ack(cfg, status="OK", result={"job_id": job_id}, **common)
+    except Exception as e:
+        log("scanbot: bundle upload for %s failed: %s" % (job_id, e))
+        _post_bytes(cfg, "/api/agent/scanbot/bundle",
+                    {"device_id": cfg["device_id"], "job_id": job_id, "error": str(e)[:300]}, b"",
+                    retries=2)
+        send_ack(cfg, status="FAILED", error=str(e), **common)
+    finally:
+        _scanbot_bundles_busy.discard(job_id)
+
+
+def scanbot_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    op = payload.get("operation")
+    common = dict(request_id=payload.get("request_id", ""), deployment_uid=payload.get("deployment_uid"),
+                  operation=op)
+    try:
+        svc = _scanbot_service_for(payload)
+        if op == "scanbot_fetch_bundle":
+            _scanbot_fetch_bundle(cfg, svc, payload)
+            return
+        result = None
+        job_id = payload.get("job_id")
+        if op == "scanbot_submit":
+            result = _scanbot_submit(svc, payload)
+        elif op == "scanbot_cancel":
+            _scanbot_json(svc, "POST", "/jobs/%s" % job_id,
+                          {"state": "cancelled", "message": "cancelled from IEMS"})
+            result = {"job_id": job_id}
+        elif op == "scanbot_retry":
+            _scanbot_json(svc, "POST", "/jobs/%s" % job_id,
+                          {"state": "frames_ready", "message": "retry requested from IEMS", "retry": True})
+            result = {"job_id": job_id}
+        send_ack(cfg, status="OK", result=result, **common)
+    except Exception as e:
+        log("scanbot: %s failed: %s" % (op, e))
+        send_ack(cfg, status="FAILED", error=str(e), **common)
+    _scanbot_wake.set()
+
+
+def _scanbot_trim(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out = []
+    for job in sorted(jobs, key=lambda j: j.get("created") or 0)[-100:]:
+        j = dict(job)
+        if isinstance(j.get("log_tail"), str):
+            j["log_tail"] = j["log_tail"][-4000:]
+        if isinstance(j.get("history"), list):
+            j["history"] = j["history"][-30:]
+        if isinstance(j.get("missing"), list):
+            j["missing"] = j["missing"][:50]
+        out.append(j)
+    return out
+
+
+def _scanbot_upload_previews(cfg: Dict[str, Any], svc: Dict[str, Any], wanted: List[Any]) -> None:
+    now = time.time()
+    todo = []
+    for item in wanted:
+        if not isinstance(item, dict):
+            continue
+        job_id, name, rel = item.get("job_id"), item.get("name"), item.get("path")
+        if job_id and name and rel and now - _scanbot_preview_tried.get((job_id, name), 0) >= 300:
+            todo.append((job_id, name, rel))
+    for job_id, name, rel in todo[:6]:
+        _scanbot_preview_tried[(job_id, name)] = now
+        try:
+            resp = _scanbot_request(svc, "GET", "/jobs/%s/files/%s" % (job_id, rel), stream=True, timeout=60)
+            try:
+                if resp.status_code >= 400:
+                    continue
+                size = int(resp.headers.get("Content-Length") or 0)
+                if size > SCANBOT_PREVIEW_MAX_BYTES:
+                    log("scanbot: preview %s/%s is %d MB; not uploading" % (job_id, rel, size // (1 << 20)))
+                    continue
+                data = _read_up_to(resp.raw, SCANBOT_PREVIEW_MAX_BYTES + 1)
+            finally:
+                resp.close()
+            if _post_bytes(cfg, "/api/agent/scanbot/file",
+                           {"device_id": cfg["device_id"], "job_id": job_id, "name": name}, data):
+                log("scanbot: uploaded preview %s/%s" % (job_id, name))
+        except Exception as e:
+            log("scanbot: preview %s/%s failed: %s" % (job_id, name, e))
+
+
+def scanbot_sync_once(cfg: Dict[str, Any], last: Dict[str, Any]) -> None:
+    services = _scanbot_services()
+    if not services:
+        return
+    svc = services[0]
+    reachable, error, jobs = True, None, []
+    try:
+        jobs = _scanbot_json(svc, "GET", "/jobs") or []
+    except Exception as e:
+        reachable, error = False, str(e)[:300]
+    sig = json.dumps([svc["deployment_uid"], reachable, error,
+                      [(j.get("id"), j.get("state"), j.get("updated")) for j in jobs]])
+    now = time.time()
+    if sig == last.get("sig") and now - last.get("sent", 0) < SCANBOT_REPORT_EVERY_S:
+        return
+    url = cfg["portal"]["base_url"].rstrip("/") + "/api/agent/scanbot/report"
+    body = post_json_response(url, {
+        "device_id": cfg["device_id"],
+        "deployment_uid": svc["deployment_uid"],
+        "reachable": reachable,
+        "error": error,
+        "jobs": _scanbot_trim(jobs),
+    }, retries=1, timeout=30, api_key=load_api_key())
+    if body is None:
+        return
+    last["sig"], last["sent"] = sig, now
+    if reachable:
+        _scanbot_upload_previews(cfg, svc, body.get("want_previews") or [])
+
+
+def scanbot_sync_loop(cfg: Dict[str, Any]) -> None:
+    last = {}  # type: Dict[str, Any]
+    while True:
+        try:
+            scanbot_sync_once(cfg, last)
+        except Exception as e:
+            log("scanbot sync failed: %s" % e)
+        _scanbot_wake.wait(SCANBOT_SYNC_S)
+        _scanbot_wake.clear()
+
+
 def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any],
                  received_mono: Optional[float] = None) -> None:
     op = payload.get("operation")
@@ -1526,6 +1884,8 @@ def _run_command(cfg: Dict[str, Any], payload: Dict[str, Any],
             stream_start(cfg, payload)
         elif op == "stream_stop":
             stream_stop(cfg, payload)
+        elif op in _SCANBOT_OPS:
+            scanbot_command(cfg, payload)
         elif op == "status_container":
             subprocess.run(["docker", "ps", "-a"], check=False)
         elif op == "get_container_logs":
@@ -1678,6 +2038,8 @@ def main() -> None:
     except Exception as e:
         log("boot recover failed: %s" % e)
     threading.Thread(target=heartbeat_loop, args=(cfg,), daemon=True).start()
+    threading.Thread(target=scanbot_sync_loop, args=(cfg,), daemon=True,
+                     name="icicle-scanbot-sync").start()
     mqtt_loop(cfg)
 
 

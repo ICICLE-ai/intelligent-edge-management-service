@@ -48,6 +48,7 @@ OWNER = os.environ["LOCAL_DEV_USERNAME"]
 
 UNETPP = "mc_seed_unetpp"                    # Orin engine: sm 8.7, TensorRT 10.3, L4T 36.4
 FAUX_WEED = "mc_seed_yolo_faux_weed_mvs_live"  # Xavier JP4 engine: sm 7.2, TensorRT 7, L4T 32
+SCANBOT = "mc_seed_scanbot_dgx_recon"          # DGX Spark service: no weights file, no engine target
 
 ORIN_JP5 = {"machine": "aarch64", "jetson_model": "NVIDIA Jetson Orin Nano Developer Kit",
             "gpu_compute_capability": "8.7", "l4t_version": "35.4.1",
@@ -59,6 +60,8 @@ XAVIER_JP4 = {"machine": "aarch64", "jetson_model": "NVIDIA Jetson AGX Xavier De
               "gpu_compute_capability": "7.2", "l4t_version": "32.7.1",
               "tensorrt_version": "7.1.3.0", "memory_mb": 31002, "disk_free_gb": 120.0,
               "nvidia_runtime": True}
+SPARK = {"machine": "aarch64", "gpu_compute_capability": "12.1",
+         "memory_mb": 128000, "disk_free_gb": 800.0, "nvidia_runtime": True}
 
 
 def make_device(alias, generation, platform=None, camera_bus="csi", group_uid=""):
@@ -108,6 +111,31 @@ agx_no_runtime = make_device("agx-xavier-no-runtime", "jetson-agx-xavier-jp4-v1"
                              {**XAVIER_JP4, "nvidia_runtime": False}, camera_bus="gige-mvs")
 make_device("group-orin-jp5", "jetson-orin-nano-v1", ORIN_JP5, group_uid=mixed_group)
 make_device("group-orin-jp6", "jetson-orin-nano-v1", ORIN_JP6, group_uid=mixed_group)
+spark = make_device("spark-gb10", "dgx-spark-gb10-v1", SPARK)
+spark_low_disk = make_device("spark-disk-full", "dgx-spark-gb10-v1", {**SPARK, "disk_free_gb": 4.0})
+spark_no_runtime = make_device("spark-no-runtime", "dgx-spark-gb10-v1", {**SPARK, "nvidia_runtime": False})
+
+# The scan token and capture host belong to the station, not the app card.
+station_env_on_card = fetch_one(
+    """
+    SELECT COUNT(*) AS c
+      FROM container_spec_env e
+      JOIN container_specs s ON s.spec_uid = e.spec_uid
+     WHERE s.model_card_uid = ? AND e.var_key IN ('SCANBOT_TOKEN', 'SCANBOT_PULL_HOST')
+    """,
+    (SCANBOT,),
+)
+assert station_env_on_card["c"] == 0, station_env_on_card
+assert fetch_one("SELECT app_kind FROM model_cards WHERE model_card_uid = ?", (SCANBOT,))["app_kind"] == "scanbot"
+spark_caps = json.loads(fetch_one("SELECT capabilities_json FROM devices WHERE device_uid = ?", (spark,))["capabilities_json"])
+assert spark_caps["scan_station"]["capture_host"] == "jetson", spark_caps
+assert len(spark_caps["scan_station"]["token"]) >= 16, spark_caps
+assert spark_caps["camera_count"] == 0, spark_caps
+scanbot_artifact = fetch_one(
+    "SELECT source_type, download_url FROM model_artifacts WHERE model_card_uid = ?",
+    (SCANBOT,),
+)
+assert scanbot_artifact["source_type"] == "none" and not scanbot_artifact["download_url"], scanbot_artifact
 
 no_compat_card = model_service.create_from_payload(OWNER, model_service.build_payload_from_form({
     "display_name": "No Compatibility Declared", "version": "0.1.0", "visibility": "private",
@@ -133,6 +161,11 @@ SCENARIOS = [
     ("CUDA app -> device without NVIDIA runtime", FAUX_WEED, "DEVICE", agx_no_runtime, "NVIDIA container runtime"),
     ("App with no compatible generations", no_compat_card, "DEVICE", orin_jp5, "declares no compatible device generations"),
     ("Group: one JetPack 5 + one JetPack 6 Orin", UNETPP, "GROUP", mixed_group, "group-orin-jp5"),
+    ("Scanbot service -> DGX Spark", SCANBOT, "DEVICE", spark, None),
+    ("Scanbot service -> Orin Nano", SCANBOT, "DEVICE", orin_jp6, "is not in the app"),
+    ("Scanbot service -> Spark with 4 GB free", SCANBOT, "DEVICE", spark_low_disk, "GB free disk"),
+    ("Scanbot service -> Spark without NVIDIA runtime", SCANBOT, "DEVICE", spark_no_runtime, "NVIDIA container runtime"),
+    ("Live camera app -> scan station", no_compat_card, "DEVICE", spark, "declares no compatible device generations"),
 ]
 
 results = []
@@ -156,6 +189,22 @@ width = max(len(n) for n, _, _ in results)
 print(f"\n{'scenario':{width}}  outcome   reason")
 for name, outcome, reason in results:
     print(f"{name:{width}}  {outcome:8}  {reason}")
+
+# The station's token and capture host are injected at deploy time; no camera env.
+deploy_cmd = fetch_one(
+    "SELECT payload_json FROM device_commands WHERE device_uid = ? AND operation = 'deploy_model'",
+    (spark,),
+)
+deploy_payload = json.loads(deploy_cmd["payload_json"])
+env = {e["key"]: e for e in deploy_payload["runtime"]["environment"]}
+assert deploy_payload["model"]["app_kind"] == "scanbot", deploy_payload["model"]
+assert env["SCANBOT_TOKEN"]["value"] == spark_caps["scan_station"]["token"] and env["SCANBOT_TOKEN"]["is_secret"]
+assert env["SCANBOT_PULL_HOST"]["value"] == "jetson"
+assert not any(k.startswith("STREAM_INGEST_URL") for k in env), sorted(env)
+ssh_mounts = [m for m in deploy_payload["runtime"]["mounts"] if m["target"] == "/home/scanbot/.ssh-mount"]
+assert ssh_mounts == [{"source": spark_caps["scan_station"]["ssh_dir"], "target": "/home/scanbot/.ssh-mount",
+                       "style": "volume", "type": "bind", "mode": "ro"}], ssh_mounts
+assert env["SCANBOT_SSH_DIR"]["value"] == spark_caps["scan_station"]["ssh_dir"]
 
 # Browser Deploy posts redirect_to; the portal must toast, not return JSON.
 before = counts()

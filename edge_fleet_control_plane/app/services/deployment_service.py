@@ -111,11 +111,17 @@ def build_deploy_payload(
         {"key": e["var_key"], "value": e["var_value"], "is_secret": bool(e.get("is_secret"))}
         for e in spec.get("env", [])
     ]
+    app_kind = card.get("app_kind") or "inference"
     if device_uid:
         if device is None:
             device = devices_repo.get_any(device_uid)
-        env = _append_media_env(env, device_uid, device, card)
+        if app_kind == "scanbot":
+            env = _apply_scan_station_env(env, device)
+        else:
+            env = _append_media_env(env, device_uid, device, card)
         mounts = _merge_capability_mounts(spec.get("mounts", []), device)
+        if app_kind == "scanbot":
+            mounts = _apply_scan_station_mounts(mounts, device)
     else:
         mounts = _merge_capability_mounts(spec.get("mounts", []), None)
 
@@ -132,6 +138,7 @@ def build_deploy_payload(
             "version": card["version"],
             "task_type": card.get("task_type"),
             "framework": card.get("framework"),
+            "app_kind": app_kind,
         },
         "artifact": {
             "artifact_uid": artifact["artifact_uid"],
@@ -233,6 +240,32 @@ def _merge_capability_mounts(spec_mounts: List[dict], device: Optional[dict]) ->
             "mode": mode or "ro",
         })
         targets.add(target.rstrip("/"))
+    return out
+
+
+def _apply_scan_station_env(env: List[dict], device: Optional[dict]) -> List[dict]:
+    """The station's scan token and capture host override anything on the card."""
+    station = device_capabilities.scan_station(device)
+    if not station:
+        return env
+    out = [e for e in env if e["key"] not in ("SCANBOT_TOKEN", "SCANBOT_PULL_HOST", "SCANBOT_SSH_DIR")]
+    out.append({"key": "SCANBOT_TOKEN", "value": station["token"], "is_secret": True})
+    out.append({"key": "SCANBOT_PULL_HOST", "value": station["capture_host"], "is_secret": False})
+    out.append({"key": "SCANBOT_SSH_DIR", "value": station["ssh_dir"], "is_secret": False})
+    return out
+
+
+SCANBOT_SSH_TARGET = "/home/scanbot/.ssh-mount"
+
+
+def _apply_scan_station_mounts(mounts: List[dict], device: Optional[dict]) -> List[dict]:
+    """Mount the station's SSH folder (key + config for the capture station) read-only."""
+    station = device_capabilities.scan_station(device)
+    if not station:
+        return mounts
+    out = [m for m in mounts if (m.get("target") or "").rstrip("/") != SCANBOT_SSH_TARGET]
+    out.append({"source": station["ssh_dir"], "target": SCANBOT_SSH_TARGET,
+                "style": "volume", "type": "bind", "mode": "ro"})
     return out
 
 

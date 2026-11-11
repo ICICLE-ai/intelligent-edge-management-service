@@ -15,6 +15,21 @@ from app.repositories import users as user_repo
 
 log = get_logger("seed")
 
+
+def _seed_env(raw: dict) -> list[dict]:
+    """Seed env values are strings, except a secret marked as {"value", "is_secret"}."""
+    env: list[dict] = []
+    for key, value in raw.items():
+        if isinstance(value, dict):
+            env.append({
+                "key": key,
+                "value": "" if value.get("value") is None else str(value.get("value")),
+                "is_secret": bool(value.get("is_secret")),
+            })
+        else:
+            env.append({"key": key, "value": str(value), "is_secret": False})
+    return env
+
 # Seeded catalog cards belong to this Tapis account, so their owner can edit
 # the compatibility minimums the portal enforces.
 CATALOG_OWNER = "habg21"
@@ -49,6 +64,7 @@ def _seed_models() -> None:
     for r in records:
         if fetch_one("SELECT 1 FROM model_cards WHERE model_card_uid = ?", (r["model_card_uid"],)):
             _refresh_seed_artifact(r)
+            _apply_app_kind(r)
             continue
         log.info("seeding model card %s", r["model_card_uid"])
         artifact = r["artifact"].copy()
@@ -73,10 +89,7 @@ def _seed_models() -> None:
             "working_dir": container.get("working_dir"),
             "entrypoint": container.get("entrypoint"),
             "command": container.get("command"),
-            "env": [
-                {"key": k, "value": v, "is_secret": False}
-                for k, v in (container.get("env") or {}).items()
-            ],
+            "env": _seed_env(container.get("env") or {}),
             "mounts": container.get("mounts") or [],
             "docker_args": container.get("docker_args") or [],
             "ports": container.get("ports") or [],
@@ -101,6 +114,35 @@ def _seed_models() -> None:
             artifact=artifact,
             spec=spec,
             compatibility=r.get("compatibility") or [],
+        )
+        _apply_app_kind(r)
+
+
+# Station settings supply these at deploy time; a card value would be stale.
+_STATION_ENV_KEYS = ("SCANBOT_TOKEN", "SCANBOT_PULL_HOST")
+
+
+def _apply_app_kind(r: dict[str, Any]) -> None:
+    kind = r.get("app_kind") or "inference"
+    uid = r["model_card_uid"]
+    execute("UPDATE model_cards SET app_kind = ? WHERE model_card_uid = ?", (kind, uid))
+    if kind == "scanbot":
+        # The catalog's scan service tracks the seed file, so a new image tag reaches existing portals.
+        execute(
+            "UPDATE model_cards SET version = ?, raw_docker_command = ? WHERE model_card_uid = ?",
+            (r["version"], r.get("raw_docker_command"), uid),
+        )
+        execute(
+            "UPDATE container_specs SET image_tag = ? WHERE model_card_uid = ?",
+            (r["container"].get("image_tag") or "latest", uid),
+        )
+        execute(
+            """
+            DELETE FROM container_spec_env
+             WHERE var_key IN (?, ?)
+               AND spec_uid IN (SELECT spec_uid FROM container_specs WHERE model_card_uid = ?)
+            """,
+            (*_STATION_ENV_KEYS, uid),
         )
 
 

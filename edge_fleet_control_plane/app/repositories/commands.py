@@ -147,6 +147,52 @@ _PENDING_OPERATIONS = (
 )
 
 
+SCAN_OPERATIONS = ("scanbot_submit", "scanbot_cancel", "scanbot_retry", "scanbot_fetch_bundle")
+
+
+def list_unacked_scan_payloads(device_uid: str, *, since_iso: str, limit: int = 10) -> List[dict]:
+    """Scan commands the agent never acked, newer than ``since_iso``.
+
+    Old ones are left out so a station that comes back online much later does
+    not start the turntable for a scan nobody is waiting for.
+    """
+    placeholders = ",".join("?" for _ in _PENDING_COMMAND_STATUSES)
+    op_placeholders = ",".join("?" for _ in SCAN_OPERATIONS)
+    rows = fetch_all(
+        """
+        SELECT payload_json FROM device_commands
+         WHERE device_uid = ?
+           AND acked_at IS NULL
+           AND status IN (%s)
+           AND operation IN (%s)
+           AND created_at >= ?
+         ORDER BY created_at ASC LIMIT ?
+        """ % (placeholders, op_placeholders),
+        (device_uid,) + _PENDING_COMMAND_STATUSES + SCAN_OPERATIONS + (since_iso, limit),
+    )
+    out: List[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("operation"):
+            out.append(payload)
+    return out
+
+
+def list_scan_commands(device_uid: str, operation: str, limit: int = 50) -> List[dict]:
+    rows = fetch_all(
+        """
+        SELECT * FROM device_commands
+         WHERE device_uid = ? AND operation = ?
+         ORDER BY created_at DESC LIMIT ?
+        """,
+        (device_uid, operation, limit),
+    )
+    return [dict(r) for r in rows]
+
+
 def list_unacked_payloads_for_device(device_uid: str, limit: int = 20) -> List[dict]:
     """MQTT payloads the agent never acked — delivered again on heartbeat.
 
