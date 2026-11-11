@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.5.1"
+AGENT_VERSION = "edge-agent-v2.5.2"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -979,7 +979,7 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
         phase_end("run_s", began)
         log(f"container started: {cname} ({container_id[:12]})")
         provenance = collect_provenance(payload, artifact_path, image=image, container_id=container_id)
-        save_json(dpath / "state.json", {
+        state_out = {
             "deployment_uid": deployment_uid,
             "container_name": cname,
             "container_id": container_id,
@@ -990,7 +990,14 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             "last_request_id": request_id,
             "last_operation": operation,
             "provenance": provenance,
-        })
+        }
+        seq = payload.get("intent_seq")
+        if seq is not None:
+            try:
+                state_out["last_intent_seq"] = int(seq)
+            except (TypeError, ValueError):
+                pass
+        save_json(dpath / "state.json", state_out)
         phase_end("total_s", origin_mono)
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="RUNNING",
@@ -1057,13 +1064,19 @@ def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
 
     try:
         if dpath.exists() and not purge:
-            _merge_state(
-                dpath,
-                desired="stopped",
-                stopped_at=time.time(),
-                last_request_id=request_id,
-                last_operation="stop_deployment",
-            )
+            stop_fields = {
+                "desired": "stopped",
+                "stopped_at": time.time(),
+                "last_request_id": request_id,
+                "last_operation": "stop_deployment",
+            }
+            seq = payload.get("intent_seq")
+            if seq is not None:
+                try:
+                    stop_fields["last_intent_seq"] = int(seq)
+                except (TypeError, ValueError):
+                    pass
+            _merge_state(dpath, **stop_fields)
         if purge:
             subprocess.run(["docker", "rm", "-f", cname], check=False)
             if image:
@@ -1580,6 +1593,29 @@ def _stale_deploy_after_stop(payload: Dict[str, Any]) -> bool:
     return _portal_deployment_status.get(uid) in _SETTLED_STOP
 
 
+def _stale_intent(payload: Dict[str, Any]) -> bool:
+    """True when a delayed command is older than the last applied intent."""
+    op = payload.get("operation")
+    if op not in {"deploy_model", "stop_deployment", "restart_deployment"}:
+        return False
+    uid = payload.get("deployment_uid")
+    seq = payload.get("intent_seq")
+    if not uid or seq is None:
+        return False
+    try:
+        seq_i = int(seq)
+    except (TypeError, ValueError):
+        return False
+    state = _load_json_if_exists(deployment_dir(uid) / "state.json") or {}
+    last = state.get("last_intent_seq")
+    if last is None:
+        return False
+    try:
+        return seq_i <= int(last)
+    except (TypeError, ValueError):
+        return False
+
+
 def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     received_mono = time.monotonic()
     op = payload.get("operation")
@@ -1591,6 +1627,10 @@ def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
         _seen_request_ids.add(request_id)
     if _command_already_applied(payload):
         log("command already applied: %s (request_id=%s)" % (op, request_id))
+        return
+    if _stale_intent(payload):
+        log("stale intent ignored: %s (request_id=%s, intent_seq=%s)"
+            % (op, request_id, payload.get("intent_seq")))
         return
     if _stale_deploy_after_stop(payload):
         log("stale deploy ignored; deployment is stopped (request_id=%s)" % request_id)

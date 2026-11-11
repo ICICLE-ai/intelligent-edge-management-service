@@ -71,8 +71,11 @@ def reset(state=None):
         (d / "state.json").write_text(json.dumps(state))
 
 
-def cmd(op, rid):
-    return {"operation": op, "request_id": rid, "deployment_uid": UID}
+def cmd(op, rid, intent_seq=None):
+    out = {"operation": op, "request_id": rid, "deployment_uid": UID}
+    if intent_seq is not None:
+        out["intent_seq"] = intent_seq
+    return out
 
 
 def check(name, cond):
@@ -192,6 +195,24 @@ check("payload without state: not restored locally",
       agent._deployment_desired_running(agent._load_json_if_exists(agent.deployment_dir(UID) / "state.json")) is False)
 agent.handle_command(CFG, cmd("deploy_model", "req-3"))
 check("payload without state: redelivered deploy executes", len(ran) == 1)
+
+# 7. A delayed stop/restart cannot override a newer intent already applied.
+reset({"deployment_uid": UID, "container_name": "c1", "desired": "running",
+       "last_request_id": "req-new", "last_intent_seq": 3})
+agent.handle_command(CFG, cmd("stop_deployment", "stop-old", intent_seq=2))
+check("delayed stop with older intent_seq: ignored", len(ran) == 0)
+agent.handle_command(CFG, cmd("restart_deployment", "restart-old", intent_seq=1))
+check("delayed restart with older intent_seq: ignored", len(ran) == 0)
+agent.handle_command(CFG, cmd("deploy_model", "req-old-seq", intent_seq=3))
+check("deploy with same intent_seq already applied: ignored", len(ran) == 0)
+agent.handle_command(CFG, cmd("stop_deployment", "stop-new", intent_seq=4))
+check("stop with newer intent_seq: executed", ran == [("stop_deployment", "stop-new")])
+
+# 7b. Commands without intent_seq still follow the stop-guard (backward compatible).
+reset({"deployment_uid": UID, "container_name": "c1", "desired": "running",
+       "last_request_id": "req-1", "last_intent_seq": 2})
+agent.handle_command(CFG, cmd("stop_deployment", "stop-no-seq"))
+check("stop without intent_seq: executed", ran == [("stop_deployment", "stop-no-seq")])
 
 print("\n%s" % ("PASS" if not check.failed else "%d FAILED" % check.failed))
 sys.exit(1 if check.failed else 0)

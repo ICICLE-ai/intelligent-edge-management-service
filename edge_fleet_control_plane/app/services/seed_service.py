@@ -73,6 +73,8 @@ def _seed_models() -> None:
             "working_dir": container.get("working_dir"),
             "entrypoint": container.get("entrypoint"),
             "command": container.get("command"),
+            "image_tensorrt_version": container.get("image_tensorrt_version"),
+            "image_l4t_version": container.get("image_l4t_version"),
             "env": [
                 {"key": k, "value": v, "is_secret": False}
                 for k, v in (container.get("env") or {}).items()

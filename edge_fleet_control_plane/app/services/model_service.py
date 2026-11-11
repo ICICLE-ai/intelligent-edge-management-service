@@ -308,6 +308,8 @@ def build_payload_from_form(form: dict) -> dict:
         "working_dir": (form.get("spec_working_dir") or "").strip() or None,
         "entrypoint": _split_optional_json_or_lines(form.get("spec_entrypoint")),
         "command": _split_optional_json_or_lines(form.get("spec_command")),
+        "image_tensorrt_version": (form.get("spec_image_tensorrt_version") or "").strip() or None,
+        "image_l4t_version": (form.get("spec_image_l4t_version") or "").strip() or None,
         "env": env,
         "mounts": mounts,
         "docker_args": docker_args,

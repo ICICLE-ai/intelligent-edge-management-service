@@ -406,6 +406,9 @@ def _record_command(
     target_gone = bool(device_uid) and devices_repo.get_any(device_uid) is None
     if target_gone:
         device_uid = None
+    if operation in ("deploy_model", "stop_deployment", "restart_deployment"):
+        payload = dict(payload)
+        payload["intent_seq"] = commands_repo.next_intent_seq(deployment_uid, device_uid)
     commands_repo.insert(
         command_uid=gen_uid("cmd"),
         owner=owner,

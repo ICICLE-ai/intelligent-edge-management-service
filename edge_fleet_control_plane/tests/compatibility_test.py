@@ -46,8 +46,8 @@ seed_everything()
 client = TestClient(app)
 OWNER = os.environ["LOCAL_DEV_USERNAME"]
 
-UNETPP = "mc_seed_unetpp"                    # Orin engine: sm 8.7, TensorRT 10.3, L4T 36.4
-FAUX_WEED = "mc_seed_yolo_faux_weed_mvs_live"  # Xavier JP4 engine: sm 7.2, TensorRT 7, L4T 32
+UNETPP = "mc_seed_unetpp"                    # Orin engine: sm 8.7, TensorRT 10.9 in image, L4T 36.4
+FAUX_WEED = "mc_seed_yolo_faux_weed_mvs_live"  # Xavier JP4 engine: sm 7.2, TensorRT 7 on host, L4T 32
 
 ORIN_JP5 = {"machine": "aarch64", "jetson_model": "NVIDIA Jetson Orin Nano Developer Kit",
             "gpu_compute_capability": "8.7", "l4t_version": "35.4.1",
@@ -123,7 +123,7 @@ no_compat_card = model_service.create_from_payload(OWNER, model_service.build_pa
 SCENARIOS = [
     ("Orin engine -> Orin Nano, matching JetPack 6", UNETPP, "DEVICE", orin_jp6, None),
     ("Xavier JP4 engine -> AGX Xavier JP4, GigE", FAUX_WEED, "DEVICE", agx_xavier, None),
-    ("Orin engine -> Orin Nano on JetPack 5", UNETPP, "DEVICE", orin_jp5, "TensorRT 10.3, device has TensorRT 8.5"),
+    ("Orin engine -> Orin Nano on JetPack 5", UNETPP, "DEVICE", orin_jp5, "L4T 36.4, device runs L4T 35.4"),
     ("Orin engine -> Xavier NX (allowed generation)", UNETPP, "DEVICE", xavier_nx, "GPU sm 8.7, device GPU is sm 7.2"),
     ("Orin engine -> AGX Xavier", UNETPP, "DEVICE", agx_xavier, "is not in the app"),
     ("Xavier JP4 engine -> Orin Nano", FAUX_WEED, "DEVICE", orin_jp5, "is not in the app"),
@@ -168,7 +168,24 @@ loc = urlparse(r.headers["location"])
 qs = parse_qs(loc.query)
 assert loc.path == f"/devices/{orin_jp5}"
 assert qs.get("level") == ["danger"]
-assert "TensorRT 10.3" in unquote(qs["notice"][0])
+assert "L4T 36.4" in unquote(qs["notice"][0])
 assert counts() == before
+
+# Image-supplied TensorRT: host 10.3 must not refuse an image that declares 10.9.
+# An inconsistent card (engine 10.9, image 8.5) is refused without looking at the device.
+from app.services import compatibility_service as compat  # noqa: E402
+from app.repositories import model_cards as mc_repo  # noqa: E402
+from app.repositories import devices as devices_repo  # noqa: E402
+
+card = mc_repo.get_full(UNETPP)
+device = devices_repo.get_any(orin_jp6)
+assert card and device
+assert compat.check(card, device) == [], compat.check(card, device)
+
+bad = dict(card)
+bad["spec"] = dict(card["spec"] or {})
+bad["spec"]["image_tensorrt_version"] = "8.5"
+reasons = compat.check(bad, device)
+assert any("image declares TensorRT 8.5" in r for r in reasons), reasons
 
 print("\nCOMPATIBILITY TEST PASSED")

@@ -266,25 +266,22 @@
           <input class="input mono" name="artifact_sha256" value="{{ val('artifact_sha256') }}">
         </div>
       </div>
-      <p class="tiny text-mute">Engine build target. A TensorRT engine only loads on the GPU and TensorRT release it was built with; leave blank for portable artifacts (e.g. PyTorch weights).</p>
+      <p class="tiny text-mute">Engine build target. A TensorRT engine only loads on the GPU and TensorRT release it was built with. Declare the image's TensorRT and L4T under Container. Leave blank for portable artifacts (e.g. PyTorch weights).</p>
       <div class="field-grid field-grid--3">
         <div class="field">
           <label class="field__label">GPU compute capability</label>
           <input class="input mono" name="artifact_engine_compute_capability" placeholder="8.7" value="{{ val('artifact_engine_compute_capability') }}">
         </div>
         <div class="field">
-          <label class="field__label">TensorRT version</label>
-          <input class="input mono" name="artifact_engine_tensorrt_version" placeholder="8.5.2" value="{{ val('artifact_engine_tensorrt_version') }}">
-        </div>
-        <div class="field">
-          <label class="field__label">L4T (JetPack) release</label>
-          <input class="input mono" name="artifact_engine_l4t_version" placeholder="35.4" value="{{ val('artifact_engine_l4t_version') }}">
+          <label class="field__label">TensorRT version (engine)</label>
+          <input class="input mono" name="artifact_engine_tensorrt_version" placeholder="10.9" value="{{ val('artifact_engine_tensorrt_version') }}">
         </div>
         <div class="field">
           <label class="field__label">Precision</label>
           <input class="input mono" name="artifact_engine_precision" placeholder="fp16" value="{{ val('artifact_engine_precision') }}">
         </div>
       </div>
+      <input type="hidden" name="artifact_engine_l4t_version" value="{{ val('artifact_engine_l4t_version') }}">
       <div class="field">
         <label class="field__label">Notes</label>
         <textarea class="textarea" name="artifact_notes" rows="2">{{ val('artifact_notes') }}</textarea>
@@ -310,6 +307,17 @@
         <div class="field">
           <label class="field__label">Image digest</label>
           <input class="input mono" name="spec_image_digest" placeholder="sha256:…" value="{{ val('spec_image_digest') }}">
+        </div>
+      </div>
+      <p class="tiny text-mute">Image runtime. TensorRT is a version the image ships, or <code>host</code> when it uses the device's TensorRT. L4T is the JetPack line the image was built for.</p>
+      <div class="field-grid">
+        <div class="field">
+          <label class="field__label">Image TensorRT</label>
+          <input class="input mono" name="spec_image_tensorrt_version" placeholder="10.9 or host" value="{{ val('spec_image_tensorrt_version') }}">
+        </div>
+        <div class="field">
+          <label class="field__label">Image L4T (JetPack)</label>
+          <input class="input mono" name="spec_image_l4t_version" placeholder="36.4" value="{{ val('spec_image_l4t_version') }}">
         </div>
       </div>
       <div class="field-grid">
