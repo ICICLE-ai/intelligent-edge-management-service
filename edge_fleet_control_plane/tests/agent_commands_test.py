@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -213,6 +214,74 @@ reset({"deployment_uid": UID, "container_name": "c1", "desired": "running",
        "last_request_id": "req-1", "last_intent_seq": 2})
 agent.handle_command(CFG, cmd("stop_deployment", "stop-no-seq"))
 check("stop without intent_seq: executed", ran == [("stop_deployment", "stop-no-seq")])
+
+# 8. Recovery planned before a newer intent was applied must not act on the old plan.
+agent.threading.Thread = RealThread
+launched = []
+acked = []
+agent._wait_for_recover_ready = lambda payload: None
+agent._relaunch_from_payload = lambda payload, dpath, state, cname, confirm_s: (
+    launched.append(cname) or "cid-1")
+agent._ack_recovered = lambda cfg, payload, dpath, **kw: acked.append(kw.get("status"))
+agent._container_running_state = lambda name: False
+RECOVER_PAYLOAD = {"deployment_uid": UID, "container": {"container_name": "c1"}}
+
+
+def recover(snapshot):
+    del launched[:]
+    del acked[:]
+    agent._restore_fail_until.clear()
+    agent._recover_one(CFG, agent.deployment_dir(UID), RECOVER_PAYLOAD, snapshot, "boot")
+
+
+running_state = {"deployment_uid": UID, "container_name": "c1", "desired": "running",
+                 "last_intent_seq": 3}
+reset(running_state)
+recover(dict(running_state))
+check("recovery with unchanged intent: container launched and acknowledged",
+      launched == ["c1"] and acked == ["RUNNING"])
+
+# 8a. A stop was applied after the snapshot was taken.
+reset({**running_state, "desired": "stopped", "last_intent_seq": 4})
+recover(dict(running_state))
+check("recovery after a stop was applied: container not launched, no acknowledgment",
+      launched == [] and acked == [])
+
+# 8b. A newer restart advanced the intent sequence while the desired state stayed running.
+reset({**running_state, "last_intent_seq": 4})
+recover(dict(running_state))
+check("recovery after a newer intent_seq was applied: container not launched",
+      launched == [] and acked == [])
+
+# 8c. A stop arrives while recovery is launching the container: the stop waits,
+# runs after the launch, and is the last writer of both the container and the state.
+reset(running_state)
+events = []
+real_run = agent.subprocess.run
+real_send_ack = agent.send_ack
+agent._relaunch_from_payload = lambda payload, dpath, state, cname, confirm_s: (
+    events.append("launch-start"), time.sleep(0.3), events.append("launch-end"), "cid-1")[-1]
+agent._ack_recovered = lambda cfg, payload, dpath, **kw: (
+    events.append("recover-ack"),
+    agent._merge_state(dpath, desired="running"))
+agent.subprocess.run = lambda cmd_, **kw: events.append("remove-container")
+agent.send_ack = lambda *a, **kw: events.append("stop-ack")
+try:
+    rec = RealThread(target=agent._recover_one, args=(
+        CFG, agent.deployment_dir(UID), RECOVER_PAYLOAD, dict(running_state), "boot"))
+    rec.start()
+    time.sleep(0.05)
+    agent.stop_deployment(CFG, {"deployment_uid": UID, "request_id": "stop-race",
+                                "container_name": "c1", "intent_seq": 4})
+    rec.join()
+finally:
+    agent.subprocess.run = real_run
+    agent.send_ack = real_send_ack
+final = json.loads((agent.deployment_dir(UID) / "state.json").read_text())
+check("stop during recovery: recovery finishes first, then the stop removes the container",
+      events == ["launch-start", "launch-end", "recover-ack", "remove-container", "stop-ack"])
+check("stop during recovery: the stopped intent is the final state",
+      final["desired"] == "stopped" and final["last_intent_seq"] == 4)
 
 print("\n%s" % ("PASS" if not check.failed else "%d FAILED" % check.failed))
 sys.exit(1 if check.failed else 0)

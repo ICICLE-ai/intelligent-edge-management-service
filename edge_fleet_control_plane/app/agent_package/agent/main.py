@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.5.2"
+AGENT_VERSION = "edge-agent-v2.5.3"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -1054,7 +1054,32 @@ def restart_deployment(cfg: Dict[str, Any], payload: Dict[str, Any],
                  container_name=cname, error=str(e))
 
 
+_deployment_locks: Dict[str, threading.Lock] = {}
+_deployment_locks_guard = threading.Lock()
+
+
+def _deployment_lock(deployment_uid: str) -> threading.Lock:
+    """One lock per deployment, shared by stop and recovery.
+
+    Stop writes the stopped intent and removes the container under this lock;
+    recovery re-reads the intent and launches the container under it. The two
+    therefore run one after the other, and whichever runs second sees the
+    first one's result.
+    """
+    with _deployment_locks_guard:
+        lock = _deployment_locks.get(deployment_uid)
+        if lock is None:
+            lock = threading.Lock()
+            _deployment_locks[deployment_uid] = lock
+        return lock
+
+
 def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    with _deployment_lock(payload["deployment_uid"]):
+        _stop_deployment_locked(cfg, payload)
+
+
+def _stop_deployment_locked(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     deployment_uid = payload["deployment_uid"]
     request_id = payload["request_id"]
     cname = payload["container_name"]
@@ -1252,6 +1277,46 @@ def _relaunch_from_payload(payload: Dict[str, Any], dpath: Path,
     )
 
 
+def _recovery_still_wanted(dpath: Path, snapshot: Dict[str, Any]) -> bool:
+    """True when the intent recovery was planned from is still the current one.
+
+    Recovery works from a snapshot of state.json taken before it waits for
+    Docker, the camera service and the ingest host. A stop, restart, or newer
+    deploy that was applied in the meantime changes the desired state or the
+    last applied intent sequence, and recovery must not act on the old plan.
+    """
+    now_state = _load_json_if_exists(dpath / "state.json") or {}
+    if not _deployment_desired_running(now_state):
+        return False
+    return now_state.get("last_intent_seq") == snapshot.get("last_intent_seq")
+
+
+def _recover_attempt(payload: Dict[str, Any], dpath: Path, state: Dict[str, Any],
+                     cname: str, reason: str, attempt: int, attempts: int,
+                     confirm_s: float) -> Optional[str]:
+    """Start the intended container once and return its id."""
+    if reason == "boot":
+        log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+            reason, cname, attempt, attempts))
+        return _relaunch_from_payload(payload, dpath, state, cname, confirm_s)
+    current = _container_running_state(cname)
+    if current is False:
+        log("recover (%s): docker start %s (attempt %s/%s)" % (
+            reason, cname, attempt, attempts))
+        prepare_host_display_for_camera()
+        result = _subprocess_run(
+            ["docker", "start", cname], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "docker start failed").strip()
+            raise RuntimeError(detail[:500])
+        _confirm_container_running(cname, timeout_s=confirm_s)
+        return _command_output(["docker", "inspect", "-f", "{{.Id}}", cname])
+    log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+        reason, cname, attempt, attempts))
+    return _relaunch_from_payload(payload, dpath, state, cname, confirm_s)
+
+
 def _recover_one(cfg: Dict[str, Any], dpath: Path, payload: Dict[str, Any],
                  state: Dict[str, Any], reason: str) -> None:
     uid = payload["deployment_uid"]
@@ -1275,38 +1340,18 @@ def _recover_one(cfg: Dict[str, Any], dpath: Path, payload: Dict[str, Any],
     last_error = None  # type: Optional[Exception]
     for attempt in range(1, attempts + 1):
         try:
-            if reason == "boot":
-                log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
-                    reason, cname, attempt, attempts))
-                container_id = _relaunch_from_payload(
-                    payload, dpath, state, cname, confirm_s,
+            with _deployment_lock(uid):
+                if not _recovery_still_wanted(dpath, state):
+                    log("recover (%s): %s not relaunched; a newer intent was applied" % (
+                        reason, cname))
+                    return
+                container_id = _recover_attempt(
+                    payload, dpath, state, cname, reason, attempt, attempts, confirm_s,
                 )
-            else:
-                current = _container_running_state(cname)
-                if current is False:
-                    log("recover (%s): docker start %s (attempt %s/%s)" % (
-                        reason, cname, attempt, attempts))
-                    prepare_host_display_for_camera()
-                    result = _subprocess_run(
-                        ["docker", "start", cname], capture_output=True, text=True
-                    )
-                    if result.returncode != 0:
-                        detail = (result.stderr or result.stdout or "docker start failed").strip()
-                        raise RuntimeError(detail[:500])
-                    _confirm_container_running(cname, timeout_s=confirm_s)
-                    container_id = _command_output(
-                        ["docker", "inspect", "-f", "{{.Id}}", cname]
-                    )
-                else:
-                    log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
-                        reason, cname, attempt, attempts))
-                    container_id = _relaunch_from_payload(
-                        payload, dpath, state, cname, confirm_s,
-                    )
-            _ack_recovered(
-                cfg, payload, dpath, cname=cname,
-                container_id=container_id, status="RUNNING",
-            )
+                _ack_recovered(
+                    cfg, payload, dpath, cname=cname,
+                    container_id=container_id, status="RUNNING",
+                )
             _restore_fail_until.pop(uid, None)
             log("recover (%s): %s is running" % (reason, cname))
             return

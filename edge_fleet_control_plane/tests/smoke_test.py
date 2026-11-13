@@ -549,6 +549,22 @@ assert r.json().get("ignored") == "stopped", r.json()
 dep_still_stopped = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
 assert dep_still_stopped and dep_still_stopped["status"] == "STOPPED", dict(dep_still_stopped or {})
 
+# A delayed recovery acknowledgment is exempt from the superseded-command rule but not
+# from the stopped rule: it cannot bring a stopped deployment back to RUNNING.
+r = client.post("/api/agent/ack", json={
+    "device_id": d["device_uid"],
+    "request_id": "recover-late-after-stop",
+    "deployment_uid": dep["deployment_uid"],
+    "operation": "recover_deployment",
+    "status": "RUNNING",
+    "container_id": "late5678",
+    "container_name": payload["container"]["container_name"],
+}, headers=agent_headers)
+assert r.status_code == 200, r.text
+assert r.json().get("ignored") == "stopped", r.json()
+dep_still_stopped = fetch_one("SELECT * FROM deployments WHERE deployment_uid=?", (dep["deployment_uid"],))
+assert dep_still_stopped and dep_still_stopped["status"] == "STOPPED", dict(dep_still_stopped or {})
+
 # Restart from cached artifacts
 r = client.post(f"/deployments/{dep['deployment_uid']}/restart", follow_redirects=False)
 assert r.status_code in (303, 307), r.text
