@@ -188,4 +188,18 @@ bad["spec"]["image_tensorrt_version"] = "8.5"
 reasons = compat.check(bad, device)
 assert any("image declares TensorRT 8.5" in r for r in reasons), reasons
 
+# The command records the declarations admission compared, and its intent sequence.
+import json as _json  # noqa: E402
+from app.db.session import fetch_one as _fetch_one  # noqa: E402
+row = _fetch_one(
+    "SELECT payload_json FROM device_commands WHERE operation = 'deploy_model' "
+    "AND payload_json LIKE '%unetpp_teacher%' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+)
+stored = _json.loads(row["payload_json"])
+assert stored["artifact"]["engine_tensorrt_version"] == "10.9", stored["artifact"]
+assert stored["artifact"]["engine_compute_capability"] == "8.7", stored["artifact"]
+assert stored["container"]["image_tensorrt_version"] == "10.9", stored["container"]
+assert stored["container"]["image_l4t_version"] == "36.4", stored["container"]
+assert isinstance(stored.get("intent_seq"), int) and stored["intent_seq"] >= 1, stored.get("intent_seq")
+
 print("\nCOMPATIBILITY TEST PASSED")
