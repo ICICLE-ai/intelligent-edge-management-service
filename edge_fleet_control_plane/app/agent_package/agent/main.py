@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     mqtt = None
 
 
-AGENT_VERSION = "edge-agent-v2.5.1"
+AGENT_VERSION = "edge-agent-v2.5.3"
 
 
 def _subprocess_run(*popenargs, **kwargs):
@@ -979,7 +979,7 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
         phase_end("run_s", began)
         log(f"container started: {cname} ({container_id[:12]})")
         provenance = collect_provenance(payload, artifact_path, image=image, container_id=container_id)
-        save_json(dpath / "state.json", {
+        state_out = {
             "deployment_uid": deployment_uid,
             "container_name": cname,
             "container_id": container_id,
@@ -990,7 +990,14 @@ def _start_container_from_payload(cfg: Dict[str, Any], payload: Dict[str, Any], 
             "last_request_id": request_id,
             "last_operation": operation,
             "provenance": provenance,
-        })
+        }
+        seq = payload.get("intent_seq")
+        if seq is not None:
+            try:
+                state_out["last_intent_seq"] = int(seq)
+            except (TypeError, ValueError):
+                pass
+        save_json(dpath / "state.json", state_out)
         phase_end("total_s", origin_mono)
         send_ack(cfg, request_id=request_id, deployment_uid=deployment_uid,
                  operation=operation, status="RUNNING",
@@ -1047,7 +1054,32 @@ def restart_deployment(cfg: Dict[str, Any], payload: Dict[str, Any],
                  container_name=cname, error=str(e))
 
 
+_deployment_locks: Dict[str, threading.Lock] = {}
+_deployment_locks_guard = threading.Lock()
+
+
+def _deployment_lock(deployment_uid: str) -> threading.Lock:
+    """One lock per deployment, shared by stop and recovery.
+
+    Stop writes the stopped intent and removes the container under this lock;
+    recovery re-reads the intent and launches the container under it. The two
+    therefore run one after the other, and whichever runs second sees the
+    first one's result.
+    """
+    with _deployment_locks_guard:
+        lock = _deployment_locks.get(deployment_uid)
+        if lock is None:
+            lock = threading.Lock()
+            _deployment_locks[deployment_uid] = lock
+        return lock
+
+
 def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    with _deployment_lock(payload["deployment_uid"]):
+        _stop_deployment_locked(cfg, payload)
+
+
+def _stop_deployment_locked(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     deployment_uid = payload["deployment_uid"]
     request_id = payload["request_id"]
     cname = payload["container_name"]
@@ -1057,13 +1089,19 @@ def stop_deployment(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
 
     try:
         if dpath.exists() and not purge:
-            _merge_state(
-                dpath,
-                desired="stopped",
-                stopped_at=time.time(),
-                last_request_id=request_id,
-                last_operation="stop_deployment",
-            )
+            stop_fields = {
+                "desired": "stopped",
+                "stopped_at": time.time(),
+                "last_request_id": request_id,
+                "last_operation": "stop_deployment",
+            }
+            seq = payload.get("intent_seq")
+            if seq is not None:
+                try:
+                    stop_fields["last_intent_seq"] = int(seq)
+                except (TypeError, ValueError):
+                    pass
+            _merge_state(dpath, **stop_fields)
         if purge:
             subprocess.run(["docker", "rm", "-f", cname], check=False)
             if image:
@@ -1239,6 +1277,46 @@ def _relaunch_from_payload(payload: Dict[str, Any], dpath: Path,
     )
 
 
+def _recovery_still_wanted(dpath: Path, snapshot: Dict[str, Any]) -> bool:
+    """True when the intent recovery was planned from is still the current one.
+
+    Recovery works from a snapshot of state.json taken before it waits for
+    Docker, the camera service and the ingest host. A stop, restart, or newer
+    deploy that was applied in the meantime changes the desired state or the
+    last applied intent sequence, and recovery must not act on the old plan.
+    """
+    now_state = _load_json_if_exists(dpath / "state.json") or {}
+    if not _deployment_desired_running(now_state):
+        return False
+    return now_state.get("last_intent_seq") == snapshot.get("last_intent_seq")
+
+
+def _recover_attempt(payload: Dict[str, Any], dpath: Path, state: Dict[str, Any],
+                     cname: str, reason: str, attempt: int, attempts: int,
+                     confirm_s: float) -> Optional[str]:
+    """Start the intended container once and return its id."""
+    if reason == "boot":
+        log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+            reason, cname, attempt, attempts))
+        return _relaunch_from_payload(payload, dpath, state, cname, confirm_s)
+    current = _container_running_state(cname)
+    if current is False:
+        log("recover (%s): docker start %s (attempt %s/%s)" % (
+            reason, cname, attempt, attempts))
+        prepare_host_display_for_camera()
+        result = _subprocess_run(
+            ["docker", "start", cname], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "docker start failed").strip()
+            raise RuntimeError(detail[:500])
+        _confirm_container_running(cname, timeout_s=confirm_s)
+        return _command_output(["docker", "inspect", "-f", "{{.Id}}", cname])
+    log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
+        reason, cname, attempt, attempts))
+    return _relaunch_from_payload(payload, dpath, state, cname, confirm_s)
+
+
 def _recover_one(cfg: Dict[str, Any], dpath: Path, payload: Dict[str, Any],
                  state: Dict[str, Any], reason: str) -> None:
     uid = payload["deployment_uid"]
@@ -1262,38 +1340,18 @@ def _recover_one(cfg: Dict[str, Any], dpath: Path, payload: Dict[str, Any],
     last_error = None  # type: Optional[Exception]
     for attempt in range(1, attempts + 1):
         try:
-            if reason == "boot":
-                log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
-                    reason, cname, attempt, attempts))
-                container_id = _relaunch_from_payload(
-                    payload, dpath, state, cname, confirm_s,
+            with _deployment_lock(uid):
+                if not _recovery_still_wanted(dpath, state):
+                    log("recover (%s): %s not relaunched; a newer intent was applied" % (
+                        reason, cname))
+                    return
+                container_id = _recover_attempt(
+                    payload, dpath, state, cname, reason, attempt, attempts, confirm_s,
                 )
-            else:
-                current = _container_running_state(cname)
-                if current is False:
-                    log("recover (%s): docker start %s (attempt %s/%s)" % (
-                        reason, cname, attempt, attempts))
-                    prepare_host_display_for_camera()
-                    result = _subprocess_run(
-                        ["docker", "start", cname], capture_output=True, text=True
-                    )
-                    if result.returncode != 0:
-                        detail = (result.stderr or result.stdout or "docker start failed").strip()
-                        raise RuntimeError(detail[:500])
-                    _confirm_container_running(cname, timeout_s=confirm_s)
-                    container_id = _command_output(
-                        ["docker", "inspect", "-f", "{{.Id}}", cname]
-                    )
-                else:
-                    log("recover (%s): relaunch %s from saved payload (attempt %s/%s)" % (
-                        reason, cname, attempt, attempts))
-                    container_id = _relaunch_from_payload(
-                        payload, dpath, state, cname, confirm_s,
-                    )
-            _ack_recovered(
-                cfg, payload, dpath, cname=cname,
-                container_id=container_id, status="RUNNING",
-            )
+                _ack_recovered(
+                    cfg, payload, dpath, cname=cname,
+                    container_id=container_id, status="RUNNING",
+                )
             _restore_fail_until.pop(uid, None)
             log("recover (%s): %s is running" % (reason, cname))
             return
@@ -1580,6 +1638,29 @@ def _stale_deploy_after_stop(payload: Dict[str, Any]) -> bool:
     return _portal_deployment_status.get(uid) in _SETTLED_STOP
 
 
+def _stale_intent(payload: Dict[str, Any]) -> bool:
+    """True when a delayed command is older than the last applied intent."""
+    op = payload.get("operation")
+    if op not in {"deploy_model", "stop_deployment", "restart_deployment"}:
+        return False
+    uid = payload.get("deployment_uid")
+    seq = payload.get("intent_seq")
+    if not uid or seq is None:
+        return False
+    try:
+        seq_i = int(seq)
+    except (TypeError, ValueError):
+        return False
+    state = _load_json_if_exists(deployment_dir(uid) / "state.json") or {}
+    last = state.get("last_intent_seq")
+    if last is None:
+        return False
+    try:
+        return seq_i <= int(last)
+    except (TypeError, ValueError):
+        return False
+
+
 def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
     received_mono = time.monotonic()
     op = payload.get("operation")
@@ -1591,6 +1672,10 @@ def handle_command(cfg: Dict[str, Any], payload: Dict[str, Any]) -> None:
         _seen_request_ids.add(request_id)
     if _command_already_applied(payload):
         log("command already applied: %s (request_id=%s)" % (op, request_id))
+        return
+    if _stale_intent(payload):
+        log("stale intent ignored: %s (request_id=%s, intent_seq=%s)"
+            % (op, request_id, payload.get("intent_seq")))
         return
     if _stale_deploy_after_stop(payload):
         log("stale deploy ignored; deployment is stopped (request_id=%s)" % request_id)

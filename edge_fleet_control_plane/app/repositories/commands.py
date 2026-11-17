@@ -69,6 +69,40 @@ def get_by_request_id(request_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+_INTENT_OPERATIONS = ("deploy_model", "stop_deployment", "restart_deployment")
+
+
+def next_intent_seq(deployment_uid: str, device_uid: Optional[str]) -> int:
+    """Monotonic intent number for one deployment on one device.
+
+    Used so a delayed stop or restart cannot override a newer command that
+    the agent has already applied. Group and device targets both resolve to
+    a concrete device_uid when the command is recorded.
+    """
+    if not deployment_uid:
+        return 1
+    if device_uid:
+        row = fetch_one(
+            """
+            SELECT COUNT(*) AS c FROM device_commands
+             WHERE deployment_uid = ?
+               AND (device_uid = ? OR (target_type = 'DEVICE' AND target_uid = ?))
+               AND operation IN (?, ?, ?)
+            """,
+            (deployment_uid, device_uid, device_uid) + _INTENT_OPERATIONS,
+        )
+    else:
+        row = fetch_one(
+            """
+            SELECT COUNT(*) AS c FROM device_commands
+             WHERE deployment_uid = ?
+               AND operation IN (?, ?, ?)
+            """,
+            (deployment_uid,) + _INTENT_OPERATIONS,
+        )
+    return int(row["c"] if row else 0) + 1
+
+
 def update_send_status(
     request_id: str,
     *,

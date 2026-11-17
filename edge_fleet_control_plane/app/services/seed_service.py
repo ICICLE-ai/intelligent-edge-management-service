@@ -73,6 +73,8 @@ def _seed_models() -> None:
             "working_dir": container.get("working_dir"),
             "entrypoint": container.get("entrypoint"),
             "command": container.get("command"),
+            "image_tensorrt_version": container.get("image_tensorrt_version"),
+            "image_l4t_version": container.get("image_l4t_version"),
             "env": [
                 {"key": k, "value": v, "is_secret": False}
                 for k, v in (container.get("env") or {}).items()
@@ -105,8 +107,9 @@ def _seed_models() -> None:
 
 
 def _refresh_seed_artifact(r: dict[str, Any]) -> None:
-    """Fill Patra UUID / download URL / engine target on already-seeded cards when seed JSON is updated."""
+    """Fill Patra UUID / download URL / engine and image runtime on already-seeded cards when seed JSON is updated."""
     artifact = r.get("artifact") or {}
+    container = r.get("container") or {}
     uid = r["model_card_uid"]
     execute(
         """
@@ -122,6 +125,22 @@ def _refresh_seed_artifact(r: dict[str, Any]) -> None:
                 f"UPDATE model_artifacts SET {field} = ? WHERE model_card_uid = ?",
                 (artifact[field], uid),
             )
+    # Image runtime belongs on container_specs; migration 009 may have set
+    # image_tensorrt_version='host' for old cards, so refresh from seed JSON.
+    if container.get("image_tensorrt_version") or container.get("image_l4t_version"):
+        execute(
+            """
+            UPDATE container_specs
+               SET image_tensorrt_version = COALESCE(?, image_tensorrt_version),
+                   image_l4t_version = COALESCE(?, image_l4t_version)
+             WHERE model_card_uid = ?
+            """,
+            (
+                container.get("image_tensorrt_version"),
+                container.get("image_l4t_version"),
+                uid,
+            ),
+        )
     patra = r.get("patra_model_card_uuid") or artifact.get("patra_model_card_uuid")
     download = artifact.get("download_url")
     if not patra and not download:

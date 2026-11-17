@@ -349,6 +349,8 @@ def _card_to_form(card: dict) -> dict:
         "spec_image_repository": spec.get("image_repository"),
         "spec_image_tag": spec.get("image_tag"),
         "spec_image_digest": spec.get("image_digest"),
+        "spec_image_tensorrt_version": spec.get("image_tensorrt_version"),
+        "spec_image_l4t_version": spec.get("image_l4t_version"),
         "spec_container_name": spec.get("container_name"),
         "spec_pull_policy": spec.get("pull_policy"),
         "spec_remove_after_exit": "on" if spec.get("remove_after_exit") else "",

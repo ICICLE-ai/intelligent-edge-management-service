@@ -1,6 +1,8 @@
-"""Deploy-time compatibility between a model card and a device.
+"""Deploy-time metadata-policy check between a model card and a device.
 
-A deployment is allowed only if every check passes:
+Admission compares each declared constraint with the environment that
+governs it. It does not inspect the engine binary and does not establish
+that an engine loads.
 
 1. The card lists the device's generation as compatible (an empty list
    allows nothing).
@@ -8,13 +10,15 @@ A deployment is allowed only if every check passes:
 3. If the device has reported its platform, it meets the resource minimums
    declared for that generation: memory, free disk, and an NVIDIA container
    runtime when CUDA is required.
-4. If the artifact declares an engine build target, the device's reported
-   platform matches it: exact GPU compute capability, and TensorRT / L4T
-   versions that start with the declared prefix. A device that has not
-   reported its platform cannot receive such an artifact.
-
-Precision is recorded on the artifact but not checked separately: an exact
-compute-capability match already implies the device supports it.
+4. Engine / image build target, when declared:
+   - GPU compute capability: exact match against the device (the physical GPU).
+   - L4T: the image's declared L4T (falling back to a legacy engine L4T) must
+     match the device's L4T by dotted prefix.
+   - TensorRT: the engine's declared TensorRT must match the runtime that
+     loads it. That runtime is the image's declared TensorRT, or the device's
+     host TensorRT when the image declares ``host``. An engine and an image
+     that declare different TensorRT versions are refused as inconsistent,
+     independent of the device.
 """
 
 from __future__ import annotations
@@ -43,6 +47,17 @@ def version_matches(declared: Optional[str], actual: Optional[str]) -> bool:
     want = [p for p in str(declared or "").split(".") if p]
     have = [p for p in str(actual or "").split(".") if p]
     return len(have) >= len(want) and have[: len(want)] == want
+
+
+def _image_runtime(card: dict) -> Dict[str, Optional[str]]:
+    """TensorRT / L4T declared for the container that loads the engine."""
+    spec = card.get("spec") or card.get("container") or {}
+    artifact = card.get("artifact") or {}
+    image_trt = (spec.get("image_tensorrt_version") or "").strip() or None
+    image_l4t = (spec.get("image_l4t_version") or "").strip() or None
+    if not image_l4t:
+        image_l4t = (artifact.get("engine_l4t_version") or "").strip() or None
+    return {"tensorrt": image_trt, "l4t": image_l4t}
 
 
 def check(card: dict, device: dict) -> List[str]:
@@ -80,22 +95,48 @@ def check(card: dict, device: dict) -> List[str]:
     artifact = card.get("artifact") or {}
     want_cc = artifact.get("engine_compute_capability")
     want_trt = artifact.get("engine_tensorrt_version")
-    want_l4t = artifact.get("engine_l4t_version")
-    if not (want_cc or want_trt or want_l4t):
+    runtime = _image_runtime(card)
+    want_l4t = runtime["l4t"]
+    image_trt = runtime["tensorrt"]
+
+    # Engine TensorRT must agree with the image's own TensorRT when both are declared.
+    if want_trt and image_trt and image_trt.lower() != "host":
+        if not version_matches(want_trt, image_trt) and not version_matches(image_trt, want_trt):
+            reasons.append(
+                "engine built with TensorRT %s, but the image declares TensorRT %s"
+                % (want_trt, image_trt)
+            )
+
+    needs_device = bool(want_cc or want_l4t or (want_trt and (not image_trt or image_trt.lower() == "host")))
+    if not (want_cc or want_trt or want_l4t or image_trt):
         return reasons
-    if not platform:
+    if needs_device and not platform:
         reasons.append(
             "engine is built for a specific GPU/TensorRT, but the device has not reported "
             "its platform (agent v2.2.0 or newer required)"
         )
         return reasons
-    have_cc = platform.get("gpu_compute_capability")
-    if want_cc and str(want_cc) != str(have_cc or ""):
-        reasons.append("engine built for GPU sm %s, device GPU is sm %s" % (want_cc, have_cc or "unknown"))
-    have_trt = platform.get("tensorrt_version")
-    if want_trt and not version_matches(want_trt, have_trt):
-        reasons.append("engine built with TensorRT %s, device has TensorRT %s" % (want_trt, have_trt or "unknown"))
-    have_l4t = platform.get("l4t_version")
-    if want_l4t and not version_matches(want_l4t, have_l4t):
-        reasons.append("engine built for L4T %s, device runs L4T %s" % (want_l4t, have_l4t or "unknown"))
+
+    if platform:
+        have_cc = platform.get("gpu_compute_capability")
+        if want_cc and str(want_cc) != str(have_cc or ""):
+            reasons.append(
+                "engine built for GPU sm %s, device GPU is sm %s" % (want_cc, have_cc or "unknown")
+            )
+        have_l4t = platform.get("l4t_version")
+        if want_l4t and not version_matches(want_l4t, have_l4t):
+            reasons.append(
+                "image built for L4T %s, device runs L4T %s" % (want_l4t, have_l4t or "unknown")
+            )
+        if want_trt:
+            if image_trt and image_trt.lower() != "host":
+                # Compared with the image above; the host version is irrelevant.
+                pass
+            else:
+                have_trt = platform.get("tensorrt_version")
+                if not version_matches(want_trt, have_trt):
+                    reasons.append(
+                        "engine built with TensorRT %s, device has TensorRT %s"
+                        % (want_trt, have_trt or "unknown")
+                    )
     return reasons

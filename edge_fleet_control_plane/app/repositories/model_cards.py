@@ -463,8 +463,9 @@ def _insert_spec(con, model_card_uid: str, spec: dict, ts: str) -> None:
              image_digest, container_name, pull_policy, remove_after_exit,
              restart_policy, entrypoint_json, command_json, working_dir, model_env_var,
              network_mode, gpus, runtime, privileged, ipc_mode, shm_size,
+             image_tensorrt_version, image_l4t_version,
              created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             spec["spec_uid"],
@@ -487,6 +488,8 @@ def _insert_spec(con, model_card_uid: str, spec: dict, ts: str) -> None:
             int(bool(spec.get("privileged"))),
             spec.get("ipc_mode"),
             spec.get("shm_size"),
+            spec.get("image_tensorrt_version"),
+            spec.get("image_l4t_version"),
             ts,
             ts,
         ),
@@ -510,7 +513,9 @@ def _update_spec(con, model_card_uid: str, spec: dict, ts: str) -> None:
                    remove_after_exit = ?, restart_policy = ?, entrypoint_json = ?,
                    command_json = ?, working_dir = ?, model_env_var = ?,
                    network_mode = ?, gpus = ?, runtime = ?, privileged = ?,
-                   ipc_mode = ?, shm_size = ?, updated_at = ?
+                   ipc_mode = ?, shm_size = ?,
+                   image_tensorrt_version = ?, image_l4t_version = ?,
+                   updated_at = ?
              WHERE spec_uid = ?
             """,
             (
@@ -532,6 +537,8 @@ def _update_spec(con, model_card_uid: str, spec: dict, ts: str) -> None:
                 int(bool(spec.get("privileged"))),
                 spec.get("ipc_mode"),
                 spec.get("shm_size"),
+                spec.get("image_tensorrt_version"),
+                spec.get("image_l4t_version"),
                 ts,
                 spec_uid,
             ),

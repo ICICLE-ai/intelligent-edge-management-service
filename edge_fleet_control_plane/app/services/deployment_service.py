@@ -92,6 +92,8 @@ def build_deploy_payload(
         "image_repository": spec["image_repository"],
         "image_tag": spec.get("image_tag") or "latest",
         "image_digest": spec.get("image_digest"),
+        "image_tensorrt_version": spec.get("image_tensorrt_version"),
+        "image_l4t_version": spec.get("image_l4t_version"),
         "container_name": spec["container_name"],
         "pull_policy": spec.get("pull_policy") or "if_not_present",
         "remove_after_exit": bool(spec.get("remove_after_exit")),
@@ -143,6 +145,10 @@ def build_deploy_payload(
             "sha256": artifact.get("sha256"),
             "size_bytes": artifact.get("size_bytes"),
             "content_type": artifact.get("content_type"),
+            "engine_compute_capability": artifact.get("engine_compute_capability"),
+            "engine_tensorrt_version": artifact.get("engine_tensorrt_version"),
+            "engine_l4t_version": artifact.get("engine_l4t_version"),
+            "engine_precision": artifact.get("engine_precision"),
             "patra_resolve_url": _resolve_patra_download_url(artifact.get("patra_model_card_uuid") or ""),
         },
         "container": container,
@@ -406,6 +412,9 @@ def _record_command(
     target_gone = bool(device_uid) and devices_repo.get_any(device_uid) is None
     if target_gone:
         device_uid = None
+    if operation in ("deploy_model", "stop_deployment", "restart_deployment"):
+        payload = dict(payload)
+        payload["intent_seq"] = commands_repo.next_intent_seq(deployment_uid, device_uid)
     commands_repo.insert(
         command_uid=gen_uid("cmd"),
         owner=owner,
